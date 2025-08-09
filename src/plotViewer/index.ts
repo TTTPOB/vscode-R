@@ -88,6 +88,7 @@ export class HttpgdManager {
             this.viewerOptions.refreshTimeoutLength = conf.get('plot.timing.refreshInterval', 10);
             this.viewerOptions.resizeTimeoutLength = conf.get('plot.timing.resizeInterval', 100);
             this.viewerOptions.fullWindow = conf.get('plot.defaults.fullWindowMode', false);
+            this.viewerOptions.renderer = conf.get('plot.defaults.renderer', 'svgp');
             this.viewerOptions.token = token;
             const viewer = new HttpgdViewer(host, this.viewerOptions);
             if (isHost() && autoShareBrowser) {
@@ -307,6 +308,7 @@ export class HttpgdViewer implements IHttpgdViewer {
     readonly htmlTemplate: string;
     readonly smallPlotTemplate: string;
     readonly htmlRoot: string;
+    readonly renderer: string; // renderer id used for inline viewing
 
     readonly showOptions: ShowOptions;
     readonly webviewOptions: vscode.WebviewPanelOptions & vscode.WebviewOptions;
@@ -373,8 +375,10 @@ export class HttpgdViewer implements IHttpgdViewer {
         this.previewPlotLayout = this.defaultPreviewPlotLayout;
         this.defaultFullWindow = options.fullWindow ?? this.defaultFullWindow;
         this.fullWindow = this.defaultFullWindow;
-        this.resizeTimeoutLength = options.refreshTimeoutLength ?? this.resizeTimeoutLength;
+        // Use the correct option for resize debounce interval
+        this.resizeTimeoutLength = options.resizeTimeoutLength ?? this.resizeTimeoutLength;
         this.refreshTimeoutLength = options.refreshTimeoutLength ?? this.refreshTimeoutLength;
+        this.renderer = options.renderer ?? 'svgp';
         void this.api.connect();
         //void this.checkState();
     }
@@ -645,21 +649,40 @@ export class HttpgdViewer implements IHttpgdViewer {
 
     // get content of a single plot
     protected async getPlotContent(id: HttpgdPlotId, width: number, height: number, zoom: number): Promise<HttpgdPlot<string>> {
-
         const args = {
             id: id,
             height: height,
             width: width,
             zoom: zoom,
-            renderer: 'svgp'
+            renderer: this.renderer
         };
-
-        const plotContent = await this.api.getPlot(args);
-        const svg = await plotContent?.text() || '';
+        const resp = await this.api.getPlot(args) as unknown as Response | undefined;
+        let data = '';
+        if (resp) {
+            // Try to determine content type to decide how to embed
+            const contentType = resp.headers.get('content-type') || '';
+            if (contentType.includes('svg')) {
+                data = await resp.text() || '';
+            } else if (contentType.includes('png') || contentType.includes('jpeg') || contentType.includes('jpg') || contentType.includes('webp')) {
+                const buf = Buffer.from(await resp.arrayBuffer());
+                const mime = contentType.split(';')[0];
+                const base64 = buf.toString('base64');
+                data = `<img src="data:${mime};base64,${base64}" style="max-width: 100%; max-height: 100%;"/>`;
+            } else {
+                // Fallback: try text (works for svg), else as base64 png
+                try {
+                    data = await resp.text();
+                } catch {
+                    const buf = Buffer.from(await resp.arrayBuffer());
+                    const base64 = buf.toString('base64');
+                    data = `<img src="data:image/png;base64,${base64}" style="max-width: 100%; max-height: 100%;"/>`;
+                }
+            }
+        }
 
         const plt: HttpgdPlot<string> = {
             id: id,
-            data: svg,
+            data: data,
             height: height,
             width: width,
             zoom: zoom,

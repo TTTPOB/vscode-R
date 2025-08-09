@@ -27,7 +27,7 @@ let oldWidth = -1;
 
 const handler = document.querySelector('#handler') as HTMLDivElement;
 const largePlotDiv = document.querySelector('#largePlot') as HTMLDivElement;
-const largeSvg = largePlotDiv.querySelector('svg') as SVGElement;
+// The main plot element can be an <svg> or <img>, so don't assume SVG
 const cssLink = document.querySelector('link.overwrites') as HTMLLinkElement;
 const smallPlotDiv = document.querySelector('#smallPlots') as HTMLDivElement;
 
@@ -65,13 +65,7 @@ function postResizeMessage(userTriggered: boolean = false){
     }
 }
 
-function postLogMessage(content: any){
-    console.log(content);
-    vscode.postMessage({
-        message: 'log',
-        body: content
-    });
-}
+//
 
 window.addEventListener('message', (ev: MessageEvent<InMessage>) => {
     const msg = ev.data;
@@ -120,6 +114,8 @@ function focusPlot(plotId: string): void {
     smallPlot.classList.add('active');
 
     largePlotDiv.innerHTML = smallPlot.innerHTML;
+    // After replacing content, notify backend to recompute size
+    setTimeout(() => postResizeMessage(true), 0);
 }
 
 function updatePlot(plt: Plot): void {
@@ -135,6 +131,7 @@ function updatePlot(plt: Plot): void {
 
     if(smallPlots[ind].classList.contains('active')){
         largePlotDiv.innerHTML = plt.svg;
+        setTimeout(() => postResizeMessage(true), 0);
     }
 }
 
@@ -187,7 +184,9 @@ function toggleFullWindowMode(useFullWindow: boolean): void {
 ////
 
 window.onload = () => {
-    largePlotDiv.style.height = `${largeSvg.clientHeight}px`;
+    const el = largePlotDiv.querySelector('svg, img');
+    const h = el?.clientHeight || largePlotDiv.clientHeight;
+    largePlotDiv.style.height = `${h}px`;
     postResizeMessage(true);
 };
 

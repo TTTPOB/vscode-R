@@ -34,6 +34,7 @@ export interface HttpgdViewerOptions {
     previewPlotLayout?: PreviewPlotLayout,
     resizeTimeoutLength?: number;
     refreshTimeoutLength?: number;
+    renderer?: string; // httpgd renderer id for inline viewing (e.g. 'svgp', 'png')
 }
 
 // Roughly combines the functionality of HttpgdNavigator and HttpgdViewer

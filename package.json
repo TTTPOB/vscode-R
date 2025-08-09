@@ -1890,6 +1890,12 @@
           "default": false,
           "markdownDescription": "Whether to use full window mode when launching the httpgd plot viewer."
         },
+        "r.plot.defaults.renderer": {
+          "type": "string",
+          "default": "svgp",
+          "markdownDescription": "Renderer/format to use for the httpgd plot viewer. This must be a valid renderer id supported by your httpgd server (e.g. `svgp`, `svg`, `png`, `jpeg`, `webp`). PDF and other non-image renderers are not supported in the live viewer but can be used for export.",
+          "scope": "application"
+        },
         "r.plot.timing.resizeInterval": {
           "type": "number",
           "default": 100,
