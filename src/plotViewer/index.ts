@@ -88,7 +88,7 @@ export class HttpgdManager {
             this.viewerOptions.refreshTimeoutLength = conf.get('plot.timing.refreshInterval', 10);
             this.viewerOptions.resizeTimeoutLength = conf.get('plot.timing.resizeInterval', 100);
             this.viewerOptions.fullWindow = conf.get('plot.defaults.fullWindowMode', false);
-            this.viewerOptions.renderer = conf.get('plot.defaults.renderer', 'svgp');
+            this.viewerOptions.renderer = conf.get('plot.defaults.httpgdRenderer', 'svgp');
             this.viewerOptions.token = token;
             const viewer = new HttpgdViewer(host, this.viewerOptions);
             if (isHost() && autoShareBrowser) {
