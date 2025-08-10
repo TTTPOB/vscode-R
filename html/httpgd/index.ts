@@ -52,7 +52,7 @@ function postResizeMessage(userTriggered: boolean = false){
         newHeight = window.innerHeight;
         newWidth = window.innerWidth;
     }
-    if(userTriggered || newHeight !== oldHeight || newWidth !== oldWidth){
+    if(newHeight !== oldHeight || newWidth !== oldWidth){
         const msg: ResizeMessage = {
             message: 'resize',
             height: newHeight,
