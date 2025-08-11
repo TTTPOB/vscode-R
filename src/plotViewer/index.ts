@@ -19,6 +19,58 @@ import { HttpgdIdResponse, HttpgdPlotId, HttpgdRendererId } from 'httpgd/lib/typ
 import { Response } from 'node-fetch';
 import { autoShareBrowser, isHost, shareServer } from '../liveShare';
 
+// Cache interface for plot data
+interface PlotCacheKey {
+    id: HttpgdPlotId;
+    width: number;
+    height: number;
+    zoom: number;
+    dpr: number;
+    renderer: string;
+}
+
+class PlotCache {
+    private cache = new Map<string, HttpgdPlot<string>>();
+    private maxSize: number = 50; // Maximum number of cached plots
+
+    private makeKey(params: PlotCacheKey): string {
+        return `${params.id}_${params.width}_${params.height}_${params.zoom}_${params.dpr}_${params.renderer}`;
+    }
+
+    get(params: PlotCacheKey): HttpgdPlot<string> | undefined {
+        const key = this.makeKey(params);
+        return this.cache.get(key);
+    }
+
+    set(params: PlotCacheKey, plot: HttpgdPlot<string>): void {
+        const key = this.makeKey(params);
+        
+        // Remove oldest entries if cache is full
+        if (this.cache.size >= this.maxSize) {
+            const entries = Array.from(this.cache.entries());
+            if (entries.length > 0) {
+                const oldestKey = entries[0][0];
+                this.cache.delete(oldestKey);
+            }
+        }
+        
+        this.cache.set(key, plot);
+    }
+
+    clear(): void {
+        this.cache.clear();
+    }
+
+    // Remove entries for a specific plot ID
+    removeById(id: HttpgdPlotId): void {
+        for (const [key, plot] of this.cache.entries()) {
+            if (plot.id === id) {
+                this.cache.delete(key);
+            }
+        }
+    }
+}
+
 const commands = [
     'showViewers',
     'openUrl',
@@ -36,7 +88,8 @@ const commands = [
     'closePlot',
     'resetPlots',
     'zoomIn',
-    'zoomOut'
+    'zoomOut',
+    'clearCache'
 ] as const;
 
 type CommandName = typeof commands[number];
@@ -222,6 +275,9 @@ export class HttpgdManager {
             } case 'toggleFullWindow': {
                 void viewer.toggleFullWindow();
                 break;
+            } case 'clearCache': {
+                viewer.clearPlotCache();
+                break;
             } default: {
                 break;
             }
@@ -313,6 +369,9 @@ export class HttpgdViewer implements IHttpgdViewer {
     dpr: number = 1;
     // Helper indicating if the current renderer is rasterized
     rendererIsRasterized: () => boolean = () => false;
+
+    // Plot cache for performance optimization
+    private plotCache: PlotCache = new PlotCache();
 
     readonly showOptions: ShowOptions;
     readonly webviewOptions: vscode.WebviewPanelOptions & vscode.WebviewOptions;
@@ -456,6 +515,8 @@ export class HttpgdViewer implements IHttpgdViewer {
     public resetPlots(): void {
         this.hiddenPlots = [];
         this.zoom = this.zoom0;
+        // Clear cache when plots are reset
+        this.plotCache.clear();
         void this.refreshPlots(this.api.getPlots(), true, true);
     }
 
@@ -483,6 +544,8 @@ export class HttpgdViewer implements IHttpgdViewer {
         id ??= this.activePlot;
         if (id) {
             this.hidePlot(id);
+            // Remove from cache when plot is closed
+            this.plotCache.removeById(id);
             await this.api.removePlot({ id: id });
         }
     }
@@ -532,6 +595,11 @@ export class HttpgdViewer implements IHttpgdViewer {
     public zoomIn(): void {
         this.zoom += 0.1;
         void this.resizePlot();
+    }
+
+    // Clear plot cache manually (useful for debugging or when plots change significantly)
+    public clearPlotCache(): void {
+        this.plotCache.clear();
     }
 
 
@@ -666,6 +734,22 @@ export class HttpgdViewer implements IHttpgdViewer {
 
     // get content of a single plot
     protected async getPlotContent(id: HttpgdPlotId, width: number, height: number, zoom: number): Promise<HttpgdPlot<string>> {
+        // Create cache key for this request
+        const cacheKey: PlotCacheKey = {
+            id,
+            width,
+            height,
+            zoom,
+            dpr: this.dpr,
+            renderer: this.renderer
+        };
+
+        // Try to get from cache first
+        const cachedPlot = this.plotCache.get(cacheKey);
+        if (cachedPlot) {
+            return cachedPlot;
+        }
+
         const args = {
             id: id,
             height: height,
@@ -707,6 +791,10 @@ export class HttpgdViewer implements IHttpgdViewer {
 
         this.viewHeight ??= plt.height;
         this.viewWidth ??= plt.width;
+
+        // Store in cache
+        this.plotCache.set(cacheKey, plt);
+
         return plt;
     }
 
@@ -793,6 +881,10 @@ export class HttpgdViewer implements IHttpgdViewer {
             const userTriggered = msg.userTriggered;
             const dprVal = (msg as unknown as Record<string, unknown>)['dpr'];
             if (typeof dprVal === 'number' && !Number.isNaN(dprVal)) {
+                // If DPR changed, clear cache since it affects rendering
+                if (this.dpr !== dprVal) {
+                    this.plotCache.clear();
+                }
                 this.dpr = dprVal;
             }
             void this.handleResize(height, width, userTriggered);
@@ -892,6 +984,8 @@ export class HttpgdViewer implements IHttpgdViewer {
     // E.g. to close connections etc., notify R, ...
     public dispose(): void {
         this.api.disconnect();
+        // Clear the plot cache on disposal
+        this.plotCache.clear();
     }
 }
 
