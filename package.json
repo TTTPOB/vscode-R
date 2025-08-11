@@ -1893,7 +1893,15 @@
         "r.plot.defaults.httpgdRenderer": {
           "type": "string",
           "default": "svgp",
-          "markdownDescription": "Renderer/format to use for the httpgd plot viewer. Requires `#r.plot.useHttpgd` set to true.\n\nThis must be a valid renderer id supported by httpgd server (e.g. `svgp`, `png`, check [httpgd api](https://nx10.github.io/httpgd/articles/c01_httpgd-api.html) for more options). PDF and other non-image formats are not supported."
+          "enum": [
+            "svgp",
+            "png"
+          ],
+          "enumDescriptions": [
+            "SVG (vectorized)",
+            "PNG (rasterized)"
+          ],
+          "markdownDescription": "Renderer/format to use for the httpgd plot viewer. Requires `#r.plot.useHttpgd` set to true."
         },
         "r.plot.timing.resizeInterval": {
           "type": "number",
