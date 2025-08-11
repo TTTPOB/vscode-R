@@ -19,7 +19,9 @@ export interface ResizeMessage extends IMessage {
     message: 'resize',
     height: number,
     width: number,
-    userTriggered: boolean
+    userTriggered: boolean,
+    // device pixel ratio of the webview environment
+    dpr?: number
 }
 export interface LogMessage extends IMessage {
     message: 'log',

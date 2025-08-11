@@ -23,6 +23,7 @@ const vscode = acquireVsCodeApi();
 // globals
 let oldHeight = -1;
 let oldWidth = -1;
+let lastDpr = 1;
 
 
 const handler = document.querySelector('#handler') as HTMLDivElement;
@@ -52,16 +53,31 @@ function postResizeMessage(userTriggered: boolean = false){
         newHeight = window.innerHeight;
         newWidth = window.innerWidth;
     }
+    const dpr = window.devicePixelRatio || 1;
     if(newHeight !== oldHeight || newWidth !== oldWidth){
         const msg: ResizeMessage = {
             message: 'resize',
             height: newHeight,
             width: newWidth,
-            userTriggered: userTriggered
+            userTriggered: userTriggered,
+            dpr
         };
         vscode.postMessage(msg);
         oldHeight = newHeight;
         oldWidth = newWidth;
+        lastDpr = dpr;
+    }
+    // If size didn't change but DPR did (e.g., window moved across monitors), still notify
+    else if (dpr !== lastDpr){
+        const msg: ResizeMessage = {
+            message: 'resize',
+            height: newHeight,
+            width: newWidth,
+            userTriggered: true,
+            dpr
+        };
+        vscode.postMessage(msg);
+        lastDpr = dpr;
     }
 }
 

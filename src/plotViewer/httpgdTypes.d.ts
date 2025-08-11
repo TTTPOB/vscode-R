@@ -35,6 +35,11 @@ export interface HttpgdViewerOptions {
     resizeTimeoutLength?: number;
     refreshTimeoutLength?: number;
     renderer?: string; // httpgd renderer id for inline viewing (e.g. 'svgp', 'png')
+    // Device pixel ratio used for raster renderers; default 1
+    dpr?: number;
+    // Helper to decide whether current renderer is rasterized.
+    // Hardcode mapping: 'png' -> rasterized, 'svgp' -> vectorized
+    rendererIsRasterized?: () => boolean;
 }
 
 // Roughly combines the functionality of HttpgdNavigator and HttpgdViewer

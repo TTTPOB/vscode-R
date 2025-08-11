@@ -309,6 +309,10 @@ export class HttpgdViewer implements IHttpgdViewer {
     readonly smallPlotTemplate: string;
     readonly htmlRoot: string;
     readonly renderer: string; // renderer id used for inline viewing
+    // device pixel ratio reported by the webview
+    dpr: number = 1;
+    // Helper indicating if the current renderer is rasterized
+    rendererIsRasterized: () => boolean = () => false;
 
     readonly showOptions: ShowOptions;
     readonly webviewOptions: vscode.WebviewPanelOptions & vscode.WebviewOptions;
@@ -379,6 +383,9 @@ export class HttpgdViewer implements IHttpgdViewer {
         this.resizeTimeoutLength = options.resizeTimeoutLength ?? this.resizeTimeoutLength;
         this.refreshTimeoutLength = options.refreshTimeoutLength ?? this.refreshTimeoutLength;
         this.renderer = options.renderer ?? 'svgp';
+        // Initialize DPR and rasterization helper from options (with defaults)
+        this.dpr = options.dpr ?? 1;
+        this.rendererIsRasterized = options.rendererIsRasterized ?? (() => this.renderer.toLowerCase() === 'png');
         void this.api.connect();
         //void this.checkState();
     }
@@ -556,6 +563,7 @@ export class HttpgdViewer implements IHttpgdViewer {
     protected handleResize(height: number, width: number, userTriggered: boolean = false): void {
         this.viewHeight = height;
         this.viewWidth = width;
+        // DPR is updated via messages; no-op here
         if (userTriggered || this.resizeTimeoutLength === 0) {
             if(this.resizeTimeout){
                 clearTimeout(this.resizeTimeout);
@@ -574,7 +582,11 @@ export class HttpgdViewer implements IHttpgdViewer {
     protected async resizePlot(id?: HttpgdPlotId): Promise<void> {
         id ??= this.activePlot;
         if (!id) { return; }
-        const plt = await this.getPlotContent(id, this.viewWidth, this.viewHeight, this.zoom);
+        // Apply DPR for raster renderers only
+        const scale = this.rendererIsRasterized() ? this.dpr : 1;
+        const reqWidth = Math.round(this.viewWidth * scale);
+        const reqHeight = Math.round(this.viewHeight * scale);
+        const plt = await this.getPlotContent(id, reqWidth, reqHeight, this.zoom);
         this.plotWidth = plt.width;
         this.plotHeight = plt.height;
         this.updatePlot(plt);
@@ -600,7 +612,10 @@ export class HttpgdViewer implements IHttpgdViewer {
         const newPlotPromises = plotIds.map(async (id) => {
             const plot = this.plots.find((plt) => plt.id === id);
             if (force || !plot || id === this.activePlot) {
-                return await this.getPlotContent(id, this.viewWidth, this.viewHeight, this.zoom);
+                const scale = this.rendererIsRasterized() ? this.dpr : 1;
+                const reqWidth = Math.round(this.viewWidth * scale);
+                const reqHeight = Math.round(this.viewHeight * scale);
+                return await this.getPlotContent(id, reqWidth, reqHeight, this.zoom);
             } else {
                 return plot;
             }
@@ -774,6 +789,10 @@ export class HttpgdViewer implements IHttpgdViewer {
             const height = msg.height;
             const width = msg.width;
             const userTriggered = msg.userTriggered;
+            const dprVal = (msg as unknown as Record<string, unknown>)['dpr'];
+            if (typeof dprVal === 'number' && !Number.isNaN(dprVal)) {
+                this.dpr = dprVal;
+            }
             void this.handleResize(height, width, userTriggered);
         }
     }
