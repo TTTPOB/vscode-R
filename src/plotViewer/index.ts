@@ -658,6 +658,13 @@ export class HttpgdViewer implements IHttpgdViewer {
         const plt = await this.getPlotContent(id, reqWidth, reqHeight, effectiveZoom);
         this.plotWidth = plt.width;
         this.plotHeight = plt.height;
+        
+        // Update the cached plot data to match the new size
+        const plotIndex = this.plots.findIndex(p => p.id === id);
+        if (plotIndex >= 0) {
+            this.plots[plotIndex] = plt;
+        }
+        
         this.updatePlot(plt);
     }
 
