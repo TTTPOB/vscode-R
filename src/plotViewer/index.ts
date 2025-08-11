@@ -586,7 +586,8 @@ export class HttpgdViewer implements IHttpgdViewer {
         const scale = this.rendererIsRasterized() ? this.dpr : 1;
         const reqWidth = Math.round(this.viewWidth * scale);
         const reqHeight = Math.round(this.viewHeight * scale);
-        const plt = await this.getPlotContent(id, reqWidth, reqHeight, this.zoom);
+        const effectiveZoom = this.zoom * scale;
+        const plt = await this.getPlotContent(id, reqWidth, reqHeight, effectiveZoom);
         this.plotWidth = plt.width;
         this.plotHeight = plt.height;
         this.updatePlot(plt);
@@ -615,7 +616,8 @@ export class HttpgdViewer implements IHttpgdViewer {
                 const scale = this.rendererIsRasterized() ? this.dpr : 1;
                 const reqWidth = Math.round(this.viewWidth * scale);
                 const reqHeight = Math.round(this.viewHeight * scale);
-                return await this.getPlotContent(id, reqWidth, reqHeight, this.zoom);
+                const effectiveZoom = this.zoom * scale;
+                return await this.getPlotContent(id, reqWidth, reqHeight, effectiveZoom);
             } else {
                 return plot;
             }
