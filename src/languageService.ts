@@ -14,11 +14,16 @@ export class LanguageService implements Disposable {
     private readonly initSet: Set<string> = new Set();
     private readonly config: WorkspaceConfiguration;
     private readonly outputChannel: OutputChannel;
+    private rPath: string | undefined;
+    private fallbackRPath: string | undefined;
+    private attached = false;
 
     constructor() {
         this.outputChannel = window.createOutputChannel('R Language Server');
         this.client = undefined;
         this.config = workspace.getConfiguration('r');
+        this.rPath = undefined;
+        this.fallbackRPath = undefined;
         void this.startLanguageService(this);
     }
 
@@ -44,6 +49,11 @@ export class LanguageService implements Disposable {
                         'R package {languageserver} is required to enable R language service features such as code completion, function signature, find references, etc. Do you want to install it?',
                         'You may need to reopen an R file to start the language service after the package is installed.'
                     );
+                    if (this.attached) {
+                        this.attached = false;
+                        this.rPath = this.fallbackRPath;
+                        void this.restartLanguageService();
+                    }
                 } else {
                     client.outputChannel.show();
                 }
@@ -60,7 +70,8 @@ export class LanguageService implements Disposable {
 
         const debug = config.get<boolean>('lsp.debug');
         const useRenvLibPath = config.get<boolean>('useRenvLibPath') ?? false;
-        const rPath = await getRpath() || ''; // TODO: Abort gracefully
+        const rPath = this.rPath || await getRpath() || ''; // TODO: Abort gracefully
+        this.fallbackRPath ||= rPath;
         if (debug) {
             console.log(`R path: ${rPath}`);
         }
@@ -322,6 +333,13 @@ export class LanguageService implements Disposable {
         }
     }
 
+    private async restartLanguageService(): Promise<void> {
+        await this.stopLanguageService();
+        this.clients.clear();
+        this.initSet.clear();
+        await this.startLanguageService(this);
+    }
+
     private stopLanguageService(): Thenable<void> {
         const promises: Thenable<void>[] = [];
         if (this.client) {
@@ -331,5 +349,11 @@ export class LanguageService implements Disposable {
             promises.push(client.stop());
         }
         return Promise.all(promises).then(() => undefined);
+    }
+
+    public async switchRPath(rPath: string): Promise<void> {
+        this.rPath = rPath;
+        this.attached = true;
+        await this.restartLanguageService();
     }
 }

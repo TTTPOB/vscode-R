@@ -13,7 +13,7 @@ import { config, readContent, setContext, UriIcon } from './util';
 import { purgeAddinPickerItems, dispatchRStudioAPICall } from './rstudioapi';
 
 import { IRequest } from './liveShare/shareSession';
-import { homeExtDir, rWorkspace, globalRHelp, globalHttpgdManager, extensionContext, sessionStatusBarItem } from './extension';
+import { homeExtDir, rWorkspace, globalRHelp, globalHttpgdManager, extensionContext, sessionStatusBarItem, globalLanguageService } from './extension';
 import { UUID, rHostService, rGuestService, isLiveShare, isHost, isGuestSession, closeBrowser, guestResDir, shareBrowser, openVirtualDoc, shareWorkspace } from './liveShare';
 
 export interface GlobalEnv {
@@ -783,6 +783,9 @@ async function updateRequest(sessionStatusBarItem: StatusBarItem) {
                         sessionStatusBarItem.tooltip = `${info?.version}\nProcess ID: ${pid}\nCommand: ${info?.command}\nStart time: ${info?.start_time}\nClick to attach to active terminal.`;
                         sessionStatusBarItem.show();
                         updateSessionWatcher();
+                        if (info?.command) {
+                            void globalLanguageService?.switchRPath(info.command);
+                        }
 
                         if (request.server) {
                             server = request.server;

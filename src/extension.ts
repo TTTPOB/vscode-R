@@ -37,6 +37,7 @@ export let globalHttpgdManager: httpgdViewer.HttpgdManager | undefined = undefin
 export let rmdPreviewManager: rmarkdown.RMarkdownPreviewManager | undefined = undefined;
 export let rmdKnitManager: rmarkdown.RMarkdownKnitManager | undefined = undefined;
 export let sessionStatusBarItem: vscode.StatusBarItem | undefined = undefined;
+export let globalLanguageService: languageService.LanguageService | undefined = undefined;
 
 // Called (once) when the extension is activated
 export async function activate(context: vscode.ExtensionContext): Promise<apiImplementation.RExtensionImplementation> {
@@ -165,7 +166,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<apiImp
             void vscode.window.showInformationMessage('The R language server extension has been integrated into vscode-R. You need to disable or uninstall REditorSupport.r-lsp and reload window to use the new version.');
             void vscode.commands.executeCommand('workbench.extensions.search', '@installed r-lsp');
         } else {
-            context.subscriptions.push(new languageService.LanguageService());
+            globalLanguageService = new languageService.LanguageService();
+            context.subscriptions.push(globalLanguageService);
         }
     }
 
