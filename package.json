@@ -789,6 +789,11 @@
         "category": "R Plot",
         "command": "r.plot.openExternal",
         "icon": "$(link-external)"
+      },
+      {
+        "command": "r.restartLanguageServer",
+        "title": "Restart Language Server",
+        "category": "R"
       }
     ],
     "keybindings": [

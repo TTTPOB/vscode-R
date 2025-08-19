@@ -22,7 +22,18 @@ export class LanguageService implements Disposable {
         void this.startLanguageService(this);
     }
 
+    public async restart(): Promise<void> {
+        this.outputChannel.appendLine('Restarting R Language Server...');
+        await this.stopLanguageService();
+        this.initSet.clear();
+        this.clients.clear();
+        await this.startLanguageService(this);
+        this.outputChannel.appendLine('R Language Server restarted.');
+    }
+
     dispose(): Thenable<void> {
+        this.initSet.clear();
+        this.clients.clear();
         return this.stopLanguageService();
     }
 
