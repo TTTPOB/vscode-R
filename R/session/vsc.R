@@ -649,6 +649,10 @@ attach <- function() {
             version = R.version.string,
             start_time = format(file.info(tempdir)$ctime)
         ),
+        session = list(
+            rHome = R.home("bin/R"),
+            libPaths = .libPaths()
+        ),
         plot_url = if (identical(names(dev.cur()), "httpgd")) httpgd::hgd_url(),
         server = if (use_webserver) list(
             host = host,

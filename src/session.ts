@@ -13,7 +13,7 @@ import { config, readContent, setContext, UriIcon } from './util';
 import { purgeAddinPickerItems, dispatchRStudioAPICall } from './rstudioapi';
 
 import { IRequest } from './liveShare/shareSession';
-import { homeExtDir, rWorkspace, globalRHelp, globalHttpgdManager, extensionContext, sessionStatusBarItem } from './extension';
+import { homeExtDir, rWorkspace, globalRHelp, globalHttpgdManager, extensionContext, sessionStatusBarItem, rLanguageService } from './extension';
 import { UUID, rHostService, rGuestService, isLiveShare, isHost, isGuestSession, closeBrowser, guestResDir, shareBrowser, openVirtualDoc, shareWorkspace } from './liveShare';
 
 export interface GlobalEnv {
@@ -736,9 +736,15 @@ export async function writeSuccessResponse(responseSessionDir: string): Promise<
     await writeResponse({ result: true }, responseSessionDir);
 }
 
+interface Session {
+    rHome: string;
+    libPaths: string[];
+}
+
 type ISessionRequest = {
     plot_url?: string,
-    server?: SessionServer
+    server?: SessionServer,
+    session?: Session
 } & IRequest;
 
 async function updateRequest(sessionStatusBarItem: StatusBarItem) {
@@ -792,6 +798,9 @@ async function updateRequest(sessionStatusBarItem: StatusBarItem) {
                         await setContext('rSessionActive', true);
                         if (request.plot_url) {
                             await globalHttpgdManager?.showViewer(request.plot_url);
+                        }
+                        if (config().get<boolean>('session.respawn.enabled') && request.session) {
+                            void rLanguageService?.restartWithSessionPaths(request.session.rHome, request.session.libPaths);
                         }
                         void watchProcess(pid).then((v: string) => {
                             void cleanupSession(v);

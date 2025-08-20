@@ -14,12 +14,20 @@ export class LanguageService implements Disposable {
     private readonly initSet: Set<string> = new Set();
     private readonly config: WorkspaceConfiguration;
     private readonly outputChannel: OutputChannel;
+    private sessionRPath: string | undefined;
+    private sessionLibPaths: string[] | undefined;
 
     constructor() {
         this.outputChannel = window.createOutputChannel('R Language Server');
         this.client = undefined;
         this.config = workspace.getConfiguration('r');
         void this.startLanguageService(this);
+    }
+
+    public async restartWithSessionPaths(rPath: string, libPaths: string[]): Promise<void> {
+        this.sessionRPath = rPath;
+        this.sessionLibPaths = libPaths;
+        await this.restart();
     }
 
     public async restart(): Promise<void> {
@@ -29,6 +37,8 @@ export class LanguageService implements Disposable {
         this.clients.clear();
         await this.startLanguageService(this);
         this.outputChannel.appendLine('R Language Server restarted.');
+        this.sessionRPath = undefined;
+        this.sessionLibPaths = undefined;
     }
 
     dispose(): Thenable<void> {
@@ -71,12 +81,15 @@ export class LanguageService implements Disposable {
 
         const debug = config.get<boolean>('lsp.debug');
         const useRenvLibPath = config.get<boolean>('useRenvLibPath') ?? false;
-        const rPath = await getRpath() || ''; // TODO: Abort gracefully
+        const rPath = this.sessionRPath || await getRpath() || ''; // TODO: Abort gracefully
         if (debug) {
             console.log(`R path: ${rPath}`);
         }
         const use_stdio = config.get<boolean>('lsp.use_stdio');
         const env = Object.create(process.env) as NodeJS.ProcessEnv;
+        if (this.sessionLibPaths && this.sessionLibPaths.length > 0) {
+            env.R_LIBS_USER = this.sessionLibPaths.join(':');
+        }
         env.VSCR_LSP_DEBUG = debug ? 'TRUE' : 'FALSE';
         env.VSCR_LIB_PATHS = getRLibPaths();
         env.VSCR_USE_RENV_LIB_PATH = useRenvLibPath ? 'TRUE' : 'FALSE';
