@@ -11,22 +11,33 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 8
       - uses: actions/setup-node@v3
         with:
           node-version: 18
-      - run: npm install
+          cache: 'pnpm'
+      - run: pnpm install
       - name: Run tests
         uses: GabrielBB/xvfb-action@v1.0
         with:
-          run: npm run test
+          run: pnpm test
   build:
     runs-on: ubuntu-latest
     env:
       VSIX_FILE: vscode-R.vsix
     steps:
       - uses: actions/checkout@v3
-      - run: node $SCRIPT_DIR/enableWebpack.js
-      - run: npm install
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 8
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          cache: 'pnpm'
+      - run: pnpm install
+      - run: pnpm build
       - uses: lannonbr/vsce-action@4.0.0
         with:
           args: "package -o $VSIX_FILE"
@@ -38,11 +49,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 8
       - uses: actions/setup-node@v3
         with:
           node-version: 18
-      - run: npm install
-      - run: npm run lint
+          cache: 'pnpm'
+      - run: pnpm install
+      - run: pnpm lint
   markdownlint-cli:
     runs-on: ubuntu-latest
     steps:

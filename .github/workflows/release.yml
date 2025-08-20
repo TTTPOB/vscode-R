@@ -15,14 +15,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - run: node $SCRIPT_DIR/enableWebpack.js
-      - run: npm install
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 8
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          cache: 'pnpm'
+      - run: pnpm install
+      - run: pnpm build
       - uses: lannonbr/vsce-action@4.0.0
         with:
           args: "package"
       - name: Identify output file # can be retrieved as steps.filenames.outputs.file_out
         id: filenames
-        run: echo "::set-output name=file_out::$(ls | grep "^.*\.vsix$" | head -1)"
+        run: echo "::set-output name=file_out::$(ls | grep \"^.*\\.vsix$\" | head -1)"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.filenames.outputs.file_out }}
@@ -56,8 +63,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - run: node $SCRIPT_DIR/enableWebpack.js
-      - run: npm install
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 8
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          cache: 'pnpm'
+      - run: pnpm install
+      - run: pnpm build
       - name: Publish to Open VSX Registry
         uses: HaaLeo/publish-vscode-extension@v1
         id: publishToOpenVSX
@@ -69,3 +83,4 @@ jobs:
           pat: ${{ secrets.VSCE_TOKEN }}
           registryUrl: https://marketplace.visualstudio.com
           extensionFile: ${{ steps.publishToOpenVSX.outputs.vsixPath }}
+
