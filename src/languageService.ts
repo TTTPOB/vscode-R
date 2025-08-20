@@ -35,6 +35,7 @@ export class LanguageService implements Disposable {
         await this.stopLanguageService();
         this.initSet.clear();
         this.clients.clear();
+        this.client = undefined;
         await this.startLanguageService(this);
         this.outputChannel.appendLine('R Language Server restarted.');
         this.sessionRPath = undefined;
@@ -87,11 +88,16 @@ export class LanguageService implements Disposable {
         }
         const use_stdio = config.get<boolean>('lsp.use_stdio');
         const env = Object.create(process.env) as NodeJS.ProcessEnv;
-        if (this.sessionLibPaths && this.sessionLibPaths.length > 0) {
-            env.R_LIBS_USER = this.sessionLibPaths.join(':');
+        if (this.sessionLibPaths) {
+            if (Array.isArray(this.sessionLibPaths)) {
+                env.VSCR_LIB_PATHS = this.sessionLibPaths.join('\n');
+            } else {
+                env.VSCR_LIB_PATHS = String(this.sessionLibPaths);
+            }
+        } else {
+            env.VSCR_LIB_PATHS = getRLibPaths();
         }
         env.VSCR_LSP_DEBUG = debug ? 'TRUE' : 'FALSE';
-        env.VSCR_LIB_PATHS = getRLibPaths();
         env.VSCR_USE_RENV_LIB_PATH = useRenvLibPath ? 'TRUE' : 'FALSE';
 
         const lang = config.get<string>('lsp.lang');
@@ -347,12 +353,19 @@ export class LanguageService implements Disposable {
     }
 
     private stopLanguageService(): Thenable<void> {
-        const promises: Thenable<void>[] = [];
+        const promises: Promise<void>[] = [];
+        const stopClient = async (client: LanguageClient): Promise<void> => {
+            try {
+                await client.stop();
+            } catch (e) {
+                this.outputChannel.appendLine(`Stopping language client failed: ${(e as Error).message}`);
+            }
+        };
         if (this.client) {
-            promises.push(this.client.stop());
+            promises.push(stopClient(this.client));
         }
         for (const client of this.clients.values()) {
-            promises.push(client.stop());
+            promises.push(stopClient(client));
         }
         return Promise.all(promises).then(() => undefined);
     }
