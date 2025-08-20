@@ -2,7 +2,17 @@
 
 ## Latest updates
 
-You can check all of our changes from [Release Page](https://github.com/REditorSupport/vscode-R/releases)
+## [2.8.6](https://github.com/REditorSupport/vscode-R/releases/tag/v2.8.6)
+
+### Other
+
+* Syntax update and bump to 2.8.6 ([#1605](https://github.com/REditorSupport/vscode-R/issues/1605))
+* Show sidebar icon only when extension is active ([#1579](https://github.com/REditorSupport/vscode-R/issues/1579))
+* Move R and R markdown syntaxes to vscode-R-syntax ([#1606](https://github.com/REditorSupport/vscode-R/issues/1606))
+
+### Refactor
+
+* refactor: restructure files ([#1613](https://github.com/REditorSupport/vscode-R/issues/1613))
 
 ## [2.8.5](https://github.com/REditorSupport/vscode-R/releases/tag/v2.8.5)
 
