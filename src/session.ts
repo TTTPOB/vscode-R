@@ -799,7 +799,7 @@ async function updateRequest(sessionStatusBarItem: StatusBarItem) {
                         if (request.plot_url) {
                             await globalHttpgdManager?.showViewer(request.plot_url);
                         }
-                        if (config().get<boolean>('session.respawn.enabled') && request.session) {
+                        if (config().get<boolean>('lsp.respawnOnAttach') && request.session) {
                             void rLanguageService?.restartWithSessionPaths(request.session.rHome, request.session.libPaths);
                         }
                         void watchProcess(pid).then((v: string) => {

@@ -20,7 +20,7 @@ The implementation can be broken down into three main parts: adding a new config
 
 A new boolean setting will be added to `package.json` to enable or disable this feature.
 
--   **ID:** `r.session.respawn.enabled`
+-   **ID:** `r.lsp.respawnOnAttach`
 -   **Type:** `boolean`
 -   **Default:** `false`
 -   **Scope:** leave it empty to use default values
@@ -60,7 +60,7 @@ The extension's TypeScript code will be updated to handle the new data and orche
     -   Read `rHome` and `libPaths` from the payload.
 
 2.  **Check Feature Flag:**
-    -   Before proceeding, the handler will check if the `r.session.respawn.enabled` setting is `true`.
+    -   Before proceeding, the handler will check if the `r.lsp.respawnOnAttach` setting is `true`.
 
 3.  **Trigger Language Server Restart:**
     -   If the feature is enabled, the handler will call a new method on the `LanguageService` instance (e.g., `rLanguageService.restartWithSessionPaths(rHome, libPaths)`).

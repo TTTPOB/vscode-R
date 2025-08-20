@@ -1824,7 +1824,7 @@
           "default": false,
           "description": "Default boolean value for automatically sharing R browser ports with guests."
         },
-        "r.session.respawn.enabled": {
+        "r.lsp.respawnOnAttach": {
           "type": "boolean",
           "default": false,
           "description": "Automatically restart the R Language Server using the R path and library paths from the active terminal session upon attaching. This ensures the language server matches the interactive environment. (Note: This feature is intended for Linux and macOS)."
