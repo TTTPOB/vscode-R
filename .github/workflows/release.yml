@@ -24,9 +24,7 @@ jobs:
           cache: 'pnpm'
       - run: pnpm install
       - run: pnpm build
-      - uses: lannonbr/vsce-action@4.0.0
-        with:
-          args: "package"
+      - run: pnpm dlx @vscode/vsce package --no-dependencies
       - name: Identify output file # can be retrieved as steps.filenames.outputs.file_out
         id: filenames
         run: echo "::set-output name=file_out::$(ls | grep \"^.*\\.vsix$\" | head -1)"
