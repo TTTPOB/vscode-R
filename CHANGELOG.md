@@ -1,10 +1,32 @@
 # Changelog
 
-## Unreleased
+## 2.8.9 - 2025-08-21
+
+### Bug Fixes
+
+* fix: remove from cache when update
+
+### Features
+
+* feat: add a option to respawn help server as well
+
+### Refactor
+
+* refactor: make sure lib paths returned on attach is an array
+
+**Full Changelog**: <https://github.com/TTTPOB/vscode-R/compare/v2.8.8...v2.8.9>
+
+## 2.8.8 - 2025-08-21
 
 ### Bug Fixes
 
 * fix: to fix httpgd js
+
+### Other
+
+* doc: changelog
+
+**Full Changelog**: <https://github.com/TTTPOB/vscode-R/compare/v2.8.7...v2.8.8>
 
 ## 2.8.7 - 2025-08-20
 
