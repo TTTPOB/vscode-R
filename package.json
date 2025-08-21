@@ -2007,7 +2007,7 @@
   },
   "scripts": {
     "vscode:prepublish": "npm-run-all -p compile:*",
-    "changelog": "pnpm dlx git-cliff v2.8.5.. -o",
+    "changelog": "pnpm dlx git-cliff v2.8.6.. -o",
     "build": "npm-run-all -p compile:*",
     "compile:extension": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --platform=node --sourcemap",
     "compile:help": "tsc -p ./html/help",
