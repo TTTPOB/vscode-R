@@ -688,6 +688,8 @@ export class HttpgdViewer implements IHttpgdViewer {
         const newPlotPromises = plotIds.map(async (id) => {
             const plot = this.plots.find((plt) => plt.id === id);
             if (force || !plot || id === this.activePlot) {
+                // Force a re-fetch by clearing the plot from cache.
+                this.plotCache.removeById(id);
                 const scale = this.rendererIsRasterized() ? this.dpr : 1;
                 const reqWidth = Math.round(this.viewWidth * scale);
                 const reqHeight = Math.round(this.viewHeight * scale);
