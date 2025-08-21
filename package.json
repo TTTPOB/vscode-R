@@ -1829,6 +1829,11 @@
           "default": false,
           "description": "Automatically restart the R Language Server using the R path and library paths from the active terminal session upon attaching. This ensures the language server matches the interactive environment. (Note: This feature is intended for Linux and macOS)."
         },
+        "r.help.respawnOnAttach": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, the R help server will be respawned when a session is attached, using the .libPaths() of the attached R session."
+        },
         "r.plot.devArgs": {
           "type": "object",
           "markdownDescription": "The arguments for the png device to replay user graphics to show in VSCode. Requires `#r.plot.useHttpgd#` to be set to `false`. \n\nChanges the option `vsc.dev.args` in R.",

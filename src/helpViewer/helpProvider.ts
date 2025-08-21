@@ -39,7 +39,20 @@ export class HelpProvider {
         await this.cp.port;
     }
 
-    public launchRHelpServer(): ChildProcessWithPort{
+    public async restartWithSessionPaths(libPaths: string[]): Promise<void> {
+        console.log('[vscode-R] restarting help server with new libPaths:', libPaths);
+        this.cp.dispose();
+        this.cp = this.launchRHelpServer(libPaths);
+        try {
+            console.log('[vscode-R] waiting for help server port...');
+            const port = await this.cp.port;
+            console.log('[vscode-R] help server started, port:', port);
+        } catch (e) {
+            console.error('[vscode-R] failed to restart help server:', e);
+        }
+    }
+
+    public launchRHelpServer(libPaths?: string[]): ChildProcessWithPort{
         const lim = '---vsc---';
         const portRegex = new RegExp(`.*${lim}(.*)${lim}.*`, 'ms');
 
@@ -61,7 +74,7 @@ export class HelpProvider {
             cwd: this.cwd,
             env: {
                 ...process.env,
-                VSCR_LIB_PATHS: getRLibPaths(),
+                VSCR_LIB_PATHS: libPaths ? (Array.isArray(libPaths) ? libPaths.join('\n') : String(libPaths)) : getRLibPaths(),
                 VSCR_LIM: lim,
                 VSCR_USE_RENV_LIB_PATH: config().get<boolean>('useRenvLibPath') ? 'TRUE' : 'FALSE'
             },

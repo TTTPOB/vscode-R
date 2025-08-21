@@ -802,6 +802,13 @@ async function updateRequest(sessionStatusBarItem: StatusBarItem) {
                         if (config().get<boolean>('lsp.respawnOnAttach') && request.session) {
                             void rLanguageService?.restartWithSessionPaths(request.session.rHome, request.session.libPaths);
                         }
+                        if (config().get<boolean>('help.respawnOnAttach') && request.session) {
+                            try {
+                                await globalRHelp?.helpProvider.restartWithSessionPaths(request.session.libPaths);
+                            } catch (e) {
+                                console.error('[vscode-R] failed to restart help server from session.ts:', e);
+                            }
+                        }
                         void watchProcess(pid).then((v: string) => {
                             void cleanupSession(v);
                         });
