@@ -89,11 +89,7 @@ export class LanguageService implements Disposable {
         const use_stdio = config.get<boolean>('lsp.use_stdio');
         const env = Object.create(process.env) as NodeJS.ProcessEnv;
         if (this.sessionLibPaths) {
-            if (Array.isArray(this.sessionLibPaths)) {
-                env.VSCR_LIB_PATHS = this.sessionLibPaths.join('\n');
-            } else {
-                env.VSCR_LIB_PATHS = String(this.sessionLibPaths);
-            }
+            env.VSCR_LIB_PATHS = this.sessionLibPaths.join('\n');
         } else {
             env.VSCR_LIB_PATHS = getRLibPaths();
         }

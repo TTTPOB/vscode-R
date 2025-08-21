@@ -74,7 +74,7 @@ export class HelpProvider {
             cwd: this.cwd,
             env: {
                 ...process.env,
-                VSCR_LIB_PATHS: libPaths ? (Array.isArray(libPaths) ? libPaths.join('\n') : String(libPaths)) : getRLibPaths(),
+                VSCR_LIB_PATHS: libPaths ? libPaths.join('\n') : getRLibPaths(),
                 VSCR_LIM: lim,
                 VSCR_USE_RENV_LIB_PATH: config().get<boolean>('useRenvLibPath') ? 'TRUE' : 'FALSE'
             },

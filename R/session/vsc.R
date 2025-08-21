@@ -651,7 +651,7 @@ attach <- function() {
         ),
         session = list(
             rHome = R.home("bin/R"),
-            libPaths = .libPaths()
+            libPaths = as.list(.libPaths())
         ),
         plot_url = if (identical(names(dev.cur()), "httpgd")) httpgd::hgd_url(),
         server = if (use_webserver) list(
