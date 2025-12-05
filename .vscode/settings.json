@@ -10,5 +10,7 @@
     "r.lsp.diagnostics": true,
     "editor.codeActionsOnSave": {
         "source.fixAll.markdownlint": "explicit"
-    }
+    },
+    "npm.packageManager": "pnpm",
+    "npm.scriptRunner": "pnpm"
 }
