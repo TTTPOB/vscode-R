@@ -1,37 +1,35 @@
-use anyhow::{anyhow, Result};
-use chrono::Utc;
-use hmac::{Hmac, Mac};
-use serde::Deserialize;
-use serde_json::{json, Value};
-use sha2::Sha256;
+use anyhow::{anyhow, Context, Result};
+use serde_json::{json, Map, Value};
 use std::env;
 use std::fs;
 use std::time::{Duration, Instant};
+use tokio::runtime::Builder;
 use uuid::Uuid;
 
-const LSP_COMM_TARGET: &str = "positron.lsp";
-const DEFAULT_TIMEOUT_MS: u64 = 15000;
-const IDS_DELIMITER: &str = "<IDS|MSG>";
-const SUPPORTED_SIGNATURE_SCHEME: &str = "hmac-sha256";
+use runtimelib::{
+    create_client_iopub_connection, create_client_shell_connection, CommId, CommOpen,
+    ConnectionInfo, JupyterMessage, JupyterMessageContent,
+};
 
-#[derive(Debug, Deserialize)]
-struct ConnectionInfo {
-    shell_port: u16,
-    iopub_port: u16,
-    stdin_port: u16,
-    control_port: u16,
-    hb_port: u16,
-    ip: String,
-    key: String,
-    transport: String,
-    signature_scheme: String,
-}
+const LSP_COMM_TARGET: &str = "lsp";
+const DEFAULT_TIMEOUT_MS: u64 = 15000;
+const SUPPORTED_SIGNATURE_SCHEME: &str = "hmac-sha256";
 
 #[derive(Debug)]
 struct Args {
     connection_file: String,
     ip_address: String,
     timeout_ms: u64,
+}
+
+fn debug_enabled() -> bool {
+    env::var("ARK_SIDECAR_DEBUG").map(|val| val != "0").unwrap_or(false)
+}
+
+fn log_debug(message: &str) {
+    if debug_enabled() {
+        eprintln!("{message}");
+    }
 }
 
 fn main() {
@@ -57,48 +55,36 @@ fn run() -> Result<()> {
         ));
     }
 
-    let ctx = zmq::Context::new();
-    let shell = ctx.socket(zmq::DEALER)?;
-    let identity = Uuid::new_v4().to_string();
-    shell.set_identity(identity.as_bytes())?;
-    shell.connect(&format!(
-        "{}://{}:{}",
-        connection.transport, connection.ip, connection.shell_port
-    ))?;
+    let runtime = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("Failed to build Tokio runtime")?;
 
-    let iopub = ctx.socket(zmq::SUB)?;
-    iopub.set_subscribe(b"")?;
-    iopub.connect(&format!(
-        "{}://{}:{}",
-        connection.transport, connection.ip, connection.iopub_port
-    ))?;
+    runtime.block_on(async move {
+        let session_id = Uuid::new_v4().to_string();
+        let mut iopub = create_client_iopub_connection(&connection, "", &session_id)
+            .await
+            .context("Failed to connect iopub")?;
+        let mut shell = create_client_shell_connection(&connection, &session_id)
+            .await
+            .context("Failed to connect shell")?;
 
-    let session = Uuid::new_v4().to_string();
-    let comm_id = Uuid::new_v4().to_string();
-    send_comm_open(&shell, &connection.key, &session, &comm_id, &args.ip_address)?;
+        wait_for_iopub_welcome(&mut iopub, Duration::from_millis(args.timeout_ms)).await?;
 
-    let start = Instant::now();
-    let timeout = Duration::from_millis(args.timeout_ms);
-    let mut items = [iopub.as_poll_item(zmq::POLLIN)];
+        let comm_id = Uuid::new_v4().to_string();
+        send_comm_open(&mut shell, &comm_id, &args.ip_address).await?;
+        log_debug("Sidecar: sent comm_open.");
 
-    loop {
-        if start.elapsed() > timeout {
-            return Err(anyhow!("Timed out waiting for Ark LSP comm response"));
-        }
+        let port = wait_for_comm_port(&mut iopub, &comm_id, Duration::from_millis(args.timeout_ms))
+            .await?;
+        let payload = json!({
+            "event": "lsp_port",
+            "port": port,
+        });
+        println!("{payload}");
 
-        zmq::poll(&mut items, 100)?;
-        if items[0].is_readable() {
-            let frames = iopub.recv_multipart(0)?;
-            if let Some(port) = parse_comm_port(&frames, &comm_id) {
-                let payload = json!({
-                    "event": "lsp_port",
-                    "port": port,
-                });
-                println!("{payload}");
-                return Ok(());
-            }
-        }
-    }
+        Ok::<(), anyhow::Error>(())
+    })
 }
 
 fn parse_args() -> Result<Args> {
@@ -148,89 +134,92 @@ fn read_connection(path: &str) -> Result<ConnectionInfo> {
     Ok(info)
 }
 
-fn send_comm_open(shell: &zmq::Socket, key: &str, session: &str, comm_id: &str, ip_address: &str) -> Result<()> {
-    let header = json!({
-        "msg_id": Uuid::new_v4().to_string(),
-        "username": "vscode-r",
-        "session": session,
-        "msg_type": "comm_open",
-        "version": "5.3",
-        "date": Utc::now().to_rfc3339(),
-    });
-    let parent_header = json!({});
-    let metadata = json!({});
-    let content = json!({
-        "comm_id": comm_id,
-        "target_name": LSP_COMM_TARGET,
-        "data": {
-            "ip_address": ip_address,
+async fn send_comm_open(
+    shell: &mut runtimelib::ClientShellConnection,
+    comm_id: &str,
+    ip_address: &str,
+) -> Result<()> {
+    let mut data = Map::new();
+    data.insert("ip_address".to_string(), Value::String(ip_address.to_string()));
+    let comm_open = CommOpen {
+        comm_id: CommId(comm_id.to_string()),
+        target_name: LSP_COMM_TARGET.to_string(),
+        data,
+        target_module: None,
+    };
+    let message = JupyterMessage::new(comm_open, None);
+    shell.send(message).await.context("Failed to send comm_open")
+}
+
+async fn wait_for_iopub_welcome(
+    iopub: &mut runtimelib::ClientIoPubConnection,
+    timeout: Duration,
+) -> Result<()> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .unwrap_or(Duration::from_millis(0));
+        if remaining.is_zero() {
+            return Err(anyhow!("Timed out waiting for iopub_welcome"));
         }
-    });
-
-    let header_str = serde_json::to_string(&header)?;
-    let parent_str = serde_json::to_string(&parent_header)?;
-    let metadata_str = serde_json::to_string(&metadata)?;
-    let content_str = serde_json::to_string(&content)?;
-    let signature = sign_message(key, &header_str, &parent_str, &metadata_str, &content_str)?;
-
-    let frames = vec![
-        IDS_DELIMITER.as_bytes().to_vec(),
-        signature.as_bytes().to_vec(),
-        header_str.into_bytes(),
-        parent_str.into_bytes(),
-        metadata_str.into_bytes(),
-        content_str.into_bytes(),
-    ];
-
-    shell.send_multipart(frames, 0)?;
-    Ok(())
+        let message = tokio::time::timeout(remaining, iopub.read())
+            .await
+            .map_err(|_| anyhow!("Timed out waiting for iopub_welcome"))??;
+        if matches!(message.content, JupyterMessageContent::IoPubWelcome(_)) {
+            return Ok(());
+        }
+    }
 }
 
-fn sign_message(key: &str, header: &str, parent: &str, metadata: &str, content: &str) -> Result<String> {
-    if key.is_empty() {
-        return Ok(String::new());
+async fn wait_for_comm_port(
+    iopub: &mut runtimelib::ClientIoPubConnection,
+    comm_id: &str,
+    timeout: Duration,
+) -> Result<u16> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .unwrap_or(Duration::from_millis(0));
+        if remaining.is_zero() {
+            return Err(anyhow!("Timed out waiting for Ark LSP comm response"));
+        }
+        let message = tokio::time::timeout(remaining, iopub.read())
+            .await
+            .map_err(|_| anyhow!("Timed out waiting for Ark LSP comm response"))??;
+        let JupyterMessage { content, .. } = message;
+        let JupyterMessageContent::CommMsg(comm_msg) = content else {
+            continue;
+        };
+        if comm_msg.comm_id.0 != comm_id {
+            continue;
+        }
+        if let Some(port) = extract_comm_port(&comm_msg.data) {
+            return Ok(port);
+        }
     }
-
-    let mut mac = Hmac::<Sha256>::new_from_slice(key.as_bytes())
-        .map_err(|_| anyhow!("Failed to initialize HMAC"))?;
-    mac.update(header.as_bytes());
-    mac.update(parent.as_bytes());
-    mac.update(metadata.as_bytes());
-    mac.update(content.as_bytes());
-    let result = mac.finalize().into_bytes();
-    Ok(hex::encode(result))
 }
 
-fn parse_comm_port(frames: &[Vec<u8>], comm_id: &str) -> Option<u16> {
-    let delimiter_index = frames.iter().position(|frame| frame == IDS_DELIMITER.as_bytes())?;
-    let header_index = delimiter_index.checked_add(2)?;
-    let content_index = delimiter_index.checked_add(5)?;
-
-    let header = frames.get(header_index)?;
-    let content = frames.get(content_index)?;
-
-    let header_value: Value = serde_json::from_slice(header).ok()?;
-    let msg_type = header_value.get("msg_type")?.as_str()?;
-    if msg_type != "comm_msg" {
-        return None;
+fn extract_comm_port(data: &Map<String, Value>) -> Option<u16> {
+    if let Some(Value::Object(params)) = data.get("params") {
+        if let Some(port) = find_port(&Value::Object(params.clone())) {
+            return Some(port);
+        }
     }
-
-    let content_value: Value = serde_json::from_slice(content).ok()?;
-    let content_comm_id = content_value.get("comm_id")?.as_str()?;
-    if content_comm_id != comm_id {
-        return None;
+    if let Some(Value::Object(content)) = data.get("content") {
+        if let Some(port) = find_port(&Value::Object(content.clone())) {
+            return Some(port);
+        }
     }
-
-    find_port(&content_value)
+    find_port(&Value::Object(data.clone()))
 }
 
 fn find_port(value: &Value) -> Option<u16> {
     match value {
         Value::Object(map) => {
-            if let Some(Value::Number(num)) = map.get("port") {
-                if let Some(port) = num.as_u64() {
-                    return u16::try_from(port).ok();
-                }
+            if let Some(port) = parse_port_value(map.get("port")) {
+                return Some(port);
             }
             for nested in map.values() {
                 if let Some(port) = find_port(nested) {
@@ -251,3 +240,10 @@ fn find_port(value: &Value) -> Option<u16> {
     }
 }
 
+fn parse_port_value(value: Option<&Value>) -> Option<u16> {
+    match value? {
+        Value::Number(num) => num.as_u64().and_then(|port| u16::try_from(port).ok()),
+        Value::String(text) => text.parse::<u16>().ok(),
+        _ => None,
+    }
+}
