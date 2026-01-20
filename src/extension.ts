@@ -23,6 +23,7 @@ import * as completions from './completions';
 import * as rShare from './liveShare';
 import * as httpgdViewer from './plotViewer';
 import * as languageService from './languageService';
+import * as arkLanguageService from './ark/arkLanguageService';
 import { RTaskProvider } from './tasks';
 
 
@@ -37,7 +38,7 @@ export let globalHttpgdManager: httpgdViewer.HttpgdManager | undefined = undefin
 export let rmdPreviewManager: rmarkdown.RMarkdownPreviewManager | undefined = undefined;
 export let rmdKnitManager: rmarkdown.RMarkdownKnitManager | undefined = undefined;
 export let sessionStatusBarItem: vscode.StatusBarItem | undefined = undefined;
-export let rLanguageService: languageService.LanguageService | undefined = undefined;
+export let rLanguageService: languageService.LanguageService | arkLanguageService.ArkLanguageService | undefined = undefined;
 
 // Called (once) when the extension is activated
 export async function activate(context: vscode.ExtensionContext): Promise<apiImplementation.RExtensionImplementation> {
@@ -175,7 +176,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<apiImp
             void vscode.window.showInformationMessage('The R language server extension has been integrated into vscode-R. You need to disable or uninstall REditorSupport.r-lsp and reload window to use the new version.');
             void vscode.commands.executeCommand('workbench.extensions.search', '@installed r-lsp');
         } else {
-            rLanguageService = new languageService.LanguageService();
+            const backend = util.config().get<string>('lsp.backend') || 'languageserver';
+            if (backend === 'ark') {
+                rLanguageService = new arkLanguageService.ArkLanguageService();
+            } else {
+                rLanguageService = new languageService.LanguageService();
+            }
             context.subscriptions.push(rLanguageService);
         }
     }

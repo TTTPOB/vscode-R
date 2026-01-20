@@ -1359,6 +1359,15 @@
           "default": true,
           "description": "Enable the R language service to provide code analysis features (completion, signature, hover, diagnostics, definition, etc.)"
         },
+        "r.lsp.backend": {
+          "type": "string",
+          "default": "languageserver",
+          "enum": [
+            "languageserver",
+            "ark"
+          ],
+          "description": "Select the LSP backend. Use \"ark\" to connect to an Ark kernel via the Rust sidecar."
+        },
         "r.lsp.args": {
           "type": "array",
           "items": {
@@ -1396,6 +1405,36 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Use multiple language servers for [multi-root workspaces](https://code.visualstudio.com/docs/editor/multi-root-workspaces). If disabled, only one language server will be used to handle all requests from all workspaces and files."
+        },
+        "r.ark.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Ark executable. Leave empty to use PATH."
+        },
+        "r.ark.sessionMode": {
+          "type": "string",
+          "default": "notebook",
+          "enum": [
+            "notebook",
+            "console",
+            "background"
+          ],
+          "description": "Ark session mode to use when starting the kernel."
+        },
+        "r.ark.ipAddress": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "IP address passed to Ark when opening the LSP comm."
+        },
+        "r.ark.sidecarPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Rust sidecar binary. Leave empty to use PATH or the local build output."
+        },
+        "r.ark.lspTimeoutMs": {
+          "type": "number",
+          "default": 15000,
+          "description": "Timeout in milliseconds to wait for Ark LSP port discovery."
         },
         "r.rmarkdown.codeLensCommands": {
           "type": "array",

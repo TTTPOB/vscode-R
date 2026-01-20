@@ -375,7 +375,7 @@ Ark 的 R 是嵌入式，并且它有自己的 startup 流程；你可以通过 
 - open comm `positron.lsp` 拿 port
 - `vscode-languageclient` 连接该 port
 
-这阶段仍需要一个最小 Jupyter client（至少能发 `comm_open` 并收 iopub comm 消息），但比做完整 REPL 简单很多。
+这阶段仍需要一个最小 Jupyter client（至少能发 `comm_open` 并收 iopub comm 消息），但比做完整 REPL 简单很多。**本仓库实现选择 Rust sidecar 来承担 Jupyter comm**，扩展只负责启动 Ark/sidecar 并用返回的端口连接 LSP。
 
 ### 阶段 2：Console（执行 + 输出）
 目标：支持 `r.runSelection` 走 Ark kernel 执行，并在一个面板/伪终端显示输出（先不管 plot）。
