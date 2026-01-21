@@ -11,7 +11,6 @@ import * as preview from './preview';
 import * as rGitignore from './rGitignore';
 import * as lintrConfig from './lintrConfig';
 import * as cppProperties from './cppProperties';
-import * as rTerminal from './rTerminal';
 import * as session from './session';
 import * as util from './util';
 import * as rstudioapi from './rstudioapi';
@@ -22,8 +21,9 @@ import * as rHelp from './helpViewer';
 import * as completions from './completions';
 import * as rShare from './liveShare';
 import * as httpgdViewer from './plotViewer';
-import * as languageService from './languageService';
-import * as arkLanguageService from './ark/arkLanguageService';
+import { createConsoleBackend } from './backends/console';
+import { createLanguageService } from './backends/language';
+import type { IRLanguageService } from './backends/types';
 import { RTaskProvider } from './tasks';
 
 
@@ -38,7 +38,7 @@ export let globalHttpgdManager: httpgdViewer.HttpgdManager | undefined = undefin
 export let rmdPreviewManager: rmarkdown.RMarkdownPreviewManager | undefined = undefined;
 export let rmdKnitManager: rmarkdown.RMarkdownKnitManager | undefined = undefined;
 export let sessionStatusBarItem: vscode.StatusBarItem | undefined = undefined;
-export let rLanguageService: languageService.LanguageService | arkLanguageService.ArkLanguageService | undefined = undefined;
+export let rLanguageService: IRLanguageService | undefined = undefined;
 
 // Called (once) when the extension is activated
 export async function activate(context: vscode.ExtensionContext): Promise<apiImplementation.RExtensionImplementation> {
@@ -61,27 +61,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<apiImp
     rmdKnitManager = new rmarkdown.RMarkdownKnitManager();
 
 
+    const consoleBackend = createConsoleBackend();
+    context.subscriptions.push(consoleBackend);
+
     // register commands specified in package.json
     const commands = {
-        // create R terminal
-        'r.createRTerm': rTerminal.createRTerm,
-
-        // run code from editor in terminal
-        'r.nrow': () => rTerminal.runSelectionOrWord(['nrow']),
-        'r.length': () => rTerminal.runSelectionOrWord(['length']),
-        'r.head': () => rTerminal.runSelectionOrWord(['head']),
-        'r.thead': () => rTerminal.runSelectionOrWord(['t', 'head']),
-        'r.names': () => rTerminal.runSelectionOrWord(['names']),
-        'r.view': () => rTerminal.runSelectionOrWord(['View']),
-        'r.runSource': () => { void rTerminal.runSource(false); },
-        'r.runSelection':  (code?: string) => { code ? void rTerminal.runTextInTerm(code) : void rTerminal.runSelection(); },
-        'r.runFromLineToEnd': rTerminal.runFromLineToEnd,
-        'r.runFromBeginningToLine': rTerminal.runFromBeginningToLine,
-        'r.runSelectionRetainCursor': rTerminal.runSelectionRetainCursor,
-        'r.runCommandWithSelectionOrWord': rTerminal.runCommandWithSelectionOrWord,
-        'r.runCommandWithEditorPath': rTerminal.runCommandWithEditorPath,
-        'r.runCommand': rTerminal.runCommand,
-        'r.runSourcewithEcho': () => { void rTerminal.runSource(true); },
+        ...consoleBackend.getCommandHandlers(),
 
         // chunk related
         'r.selectCurrentChunk': rmarkdown.selectCurrentChunk,
@@ -95,7 +80,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<apiImp
         'r.runAllChunks': rmarkdown.runAllChunks,
         'r.goToPreviousChunk': rmarkdown.goToPreviousChunk,
         'r.goToNextChunk': rmarkdown.goToNextChunk,
-        'r.runChunks': rTerminal.runChunksInTerm,
 
         // rmd related
         'r.knitRmd': () => { void rmdKnitManager?.knitRmd(false, undefined); },
@@ -165,9 +149,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<apiImp
         context.subscriptions.push(vscode.commands.registerCommand(key, value));
     }
 
-
-    // keep track of terminals
-    context.subscriptions.push(vscode.window.onDidCloseTerminal(rTerminal.deleteTerminal));
+    if (consoleBackend.onDidCloseTerminal) {
+        context.subscriptions.push(vscode.window.onDidCloseTerminal(consoleBackend.onDidCloseTerminal));
+    }
 
     // start language service
     if (util.config().get<boolean>('lsp.enabled')) {
@@ -176,12 +160,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<apiImp
             void vscode.window.showInformationMessage('The R language server extension has been integrated into vscode-R. You need to disable or uninstall REditorSupport.r-lsp and reload window to use the new version.');
             void vscode.commands.executeCommand('workbench.extensions.search', '@installed r-lsp');
         } else {
-            const backend = util.config().get<string>('lsp.backend') || 'languageserver';
-            if (backend === 'ark') {
-                rLanguageService = new arkLanguageService.ArkLanguageService();
-            } else {
-                rLanguageService = new languageService.LanguageService();
-            }
+            rLanguageService = createLanguageService();
             context.subscriptions.push(rLanguageService);
         }
     }
@@ -205,16 +184,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<apiImp
         wordPattern,
     });
 
-    // register terminal-provider
-    context.subscriptions.push(vscode.window.registerTerminalProfileProvider('r.terminal-profile',
-        {
-            async provideTerminalProfile() {
-                return {
-                    options: await rTerminal.makeTerminalOptions()
-                };
-            }
-        }
-    ));
+    const terminalProvider = consoleBackend.getTerminalProfileProvider?.();
+    if (terminalProvider) {
+        context.subscriptions.push(vscode.window.registerTerminalProfileProvider('r.terminal-profile', terminalProvider));
+    }
 
     // initialize httpgd viewer
     globalHttpgdManager = httpgdViewer.initializeHttpgd();
