@@ -5,6 +5,7 @@
 按你后续的新约束补充：你希望 **REPL 直接用现成的 `jupyter console`**（不在 VSCode 里实现 console 前端），那么 VSCode 扩展应扮演“会话管理 + 旁路前端（第二个 Jupyter client）”的角色：同一个 kernel 上，一边 `jupyter console` 做交互，另一边 VSCode 负责 LSP/Plot/Data Viewer/（可选）Help。
 
 > 重点结论：  
+> - **SessionMode**：设计上统一用 **Console 模式**（`--session-mode console`），因为它是 Ark 在 IDE 集成时的默认路径；这会带来 **ShowHtmlFile/中途 autoprint/动态 plot（有 UI comm 时）** 等行为差异，需要在 VSCode/sidecar 侧显式适配。  
 > - **Console**：若你接受用 `jupyter console` 当 REPL，VSCode 不必实现终端前端；但 VSCode 仍需要某种方式连接同一个 kernel（实现 Jupyter client），用来做 LSP/Plot/Data Viewer（可以在扩展里做，也可以用 sidecar）。  
 > - **Plot**：Ark 在非 Positron 情况下会走 **Jupyter `display_data` / `update_display_data`** 输出图；但目前 Ark 发送的 `image/png` 值是**渲染文件路径字符串**（不是标准 base64），VSCode 侧需要“读取该路径文件再展示”。  
 > - **Data Viewer**：Ark 已实现 Positron Data Explorer 后端（comm：`positron.dataExplorer`，协议类型由 `data_explorer.json` 生成）；VSCode 侧需要做前端 UI（webview 表格）并通过 comm 做分页/排序/过滤等 RPC。  
@@ -55,13 +56,21 @@ Ark CLI 支持用 Jupyter connection file 启动：
 - `ark --connection_file <FILE> --session-mode notebook|console|background`
 见：`ark/crates/ark/src/main.rs`
 
-因此，要把 Ark 当作“vscode-r 的 console backend”，核心就是：在扩展里启动 Ark，并实现一个最小 Jupyter 前端（连接 ZMQ 端口，发 `execute_request`，收 IOPub）。
+**本设计选择 `Console` 模式**（参见 `dev-docs/ark-session-types.md`）：
+- Console 是 Ark 在 IDE 集成时的默认行为，允许 UI comm 与动态图表路径
+- Console 会使用 `ShowHtmlFile` 消息、发送多表达式中途 autoprint，并且假定前端不发送不完整输入
+
+因此，要把 Ark 当作“vscode-r 的 console backend”，核心就是：在扩展里启动 Ark（`--session-mode console`），并实现一个最小 Jupyter 前端（连接 ZMQ 端口，发 `execute_request`，收 IOPub），同时补齐 Console 模式特有的输出/comm 适配。
 
 ### 2.3 Ark Plot：两条分支（Positron 动态 plot vs Jupyter display_data）
 Ark 绘图事件在 Rust 侧有明确分支：
 - 若 **UI comm 已连接且 session_mode=Console**，走 Positron 动态 plot（comm `positron.plot`）
 - 否则走 **Jupyter `display_data`/`update_display_data`**
 见：`ark/crates/ark/src/plots/graphics_device.rs`（`should_use_dynamic_plots()` / `process_*_jupyter_protocol()`）
+
+结合 Console 模式的约束：
+- **未实现 UI comm** 时仍会回落到 `display_data`，VSCode 必须能解析 `image/png` 的路径字符串（见下文）
+- **实现 UI comm** 后建议直接走动态 plot，避免频繁文件轮询，并支持 resize 触发重绘
 
 关键细节（对你很重要）：  
 Ark 在 Jupyter 模式下发送 `display_data` 时，`image/png` 的值来自 `.ps.graphics.render_plot_from_recording()` 的返回值，而它返回的是**文件路径**（`tempdir()/positron-plot-renderings/render-<id>.png`），不是标准的 base64 图片数据：
@@ -104,12 +113,18 @@ Ark 的 LSP 不是“VSCode 直接 `command: ark-lsp --stdio`”。它是通过 
 #### A) Console：实现最小 Jupyter client（ZMQ）
 你需要在 VSCode 扩展里做这些事：
 1. 生成 connection file（JSON，含 5 个端口、key、transport、signature_scheme 等）
-2. `spawn(ark, ["--connection_file", file, "--session-mode", "notebook"])`
+2. `spawn(ark, ["--connection_file", file, "--session-mode", "console"])`
 3. 用 Node ZMQ 连接：
    - shell（发 request、收 reply）
    - iopub（收输出：stream / execute_result / error / display_data）
    - control（中断/关闭；可选）
 4. 实现 Jupyter message 的 HMAC 签名（`signature_scheme` 一般是 `hmac-sha256`）
+
+Console 模式额外注意点（来自 `ark-session-types` 的行为差异）：
+- **ShowHtmlFile**：HTML 输出会走 Console 专用消息，需在 VSCode/sidecar 侧解析并落到 viewer/webview
+- **中途 autoprint**：多表达式执行可能产生多个 autoprint 输出，需按序展示
+- **不完整输入**：前端不应发送不完整代码块，否则 Ark 会立即拒绝
+- **错误处理**：Console 不做 notebook 的 evalue 插入逻辑，按标准 Jupyter 错误消息处理即可
 
 VSCode UI 表现建议两种（选一种）：
 - **PseudoTerminal**：在扩展里实现一个“伪终端”，让用户看到 prompt、输入与输出（接近 console 体验）
@@ -126,7 +141,7 @@ VSCode UI 表现建议两种（选一种）：
 
 ### 路线 A（推荐）：由 VSCode 扩展负责启动 Ark kernel，再启动 `jupyter console --existing`
 1) VSCode 扩展生成一个 connection file（JSON），启动 Ark：  
-   `ark --connection_file <file> --session-mode notebook`
+   `ark --connection_file <file> --session-mode console`
 2) VSCode 扩展启动 REPL 前端：  
    `jupyter console --existing <file>`
 3) VSCode 扩展同时启动一个“旁路客户端”（最好是 sidecar）也连接 `<file>`，负责：
@@ -135,6 +150,8 @@ VSCode UI 表现建议两种（选一种）：
    - comm：`positron.variables` / `positron.dataExplorer` 做 workspace & data viewer
 
 优点：扩展永远知道 connection file，最稳定，也最适合做“多会话切换”。  
+
+补充：虽然 REPL 由 `jupyter console` 承担，但 **Console 模式的 UI 输出仍需要 VSCode/sidecar 接管**（ShowHtmlFile、动态 plot、data explorer/LSP 的 comm），否则这些能力只会落到“前端不支持的消息”上。
 
 ### 路线 B（不推荐）：用户自行 `jupyter console --kernel=ark`
 这时 connection file 在 Jupyter runtime 目录里动态生成，VSCode 很难可靠判定“当前这个 console 对应哪个 kernel-*.json”。理论上可以扫 `jupyter --runtime-dir` 并让用户挑选，但边界问题很多（远程路径、多 kernel 并存、权限、容器/WSL）。  
@@ -304,7 +321,7 @@ VSCode 侧配合（建议）：
 新增配置项（建议）：
 - `r.backend`: `"terminal" | "ark"`（默认 terminal）
 - `r.ark.path`: string（ark 可执行文件路径；空则要求用户在 PATH）
-- `r.ark.sessionMode`: `"notebook" | "console"`（默认 notebook；避免触发 Positron 动态 plot 分支）
+- `r.ark.sessionMode`: `"console" | "notebook"`（默认 console，与本设计一致；notebook 仅用于兼容或调试）
 - `r.ark.ipAddress`: 默认 `"127.0.0.1"`（用于启动 LSP）
 - `r.lsp.backend`: `"languageserver" | "ark"`（可与 `r.backend` 解耦，允许只用 Ark LSP）
 
@@ -349,17 +366,21 @@ VSCode 侧配合（建议）：
   - 优点：Node 不碰 ZMQ 原生编译
   - 缺点：你要维护一个额外可执行文件的分发/更新
 
-### 5.2 Plot 数据不是标准 base64（需要适配）
+### 5.2 Console 模式 HTML 输出（ShowHtmlFile）
+Console 模式下，Ark 会用 `ShowHtmlFile` 消息发送 HTML 输出（而非 `display_data`）。  
+VSCode/sidecar 需要识别该消息并落到 viewer/webview，否则 HTML 输出会丢失。
+
+### 5.3 Plot 数据不是标准 base64（需要适配）
 如第 2.3 节，Ark 目前在 `image/png` 里放的是路径字符串。你的 viewer 要能识别并读取该文件。
 另外注意：
 - 文件在 **Ark 进程所在机器** 的临时目录
 - VSCode Remote 情况下扩展运行在远端，一般能读到；本地/远端分离时要谨慎
 
-### 5.3 LSP 的安全性（绑定地址）
+### 5.4 LSP 的安全性（绑定地址）
 启动 `positron.lsp` 时传入的 `ip_address` 会被 Ark 用来 `bind("{ip}:0")`。  
 建议强制默认 `127.0.0.1`，不要给 `0.0.0.0`，避免把 LSP 暴露到局域网。
 
-### 5.4 Session watcher（现有机制）与 Ark 的关系
+### 5.5 Session watcher（现有机制）与 Ark 的关系
 现有 session watcher 依赖 `R_PROFILE_USER` 注入 `R/session/*.R`，并让 R 写 `workspace.json/plot.png`。  
 Ark 的 R 是嵌入式，并且它有自己的 startup 流程；你可以通过 `--startup-file` 注入 R 脚本，但那会让 Ark 侧承担 vscode-r 的 watcher 协议，耦合更深。
 
@@ -371,7 +392,7 @@ Ark 的 R 是嵌入式，并且它有自己的 startup 流程；你可以通过 
 
 ### 阶段 1：只做 Ark LSP（最快看到收益）
 目标：不用改 console/plot，先让 VSCode 编辑器获得 Ark LSP 能力。
-- 启动一个 Ark kernel（后台）
+- 启动一个 Ark kernel（`--session-mode console`）
 - open comm `positron.lsp` 拿 port
 - `vscode-languageclient` 连接该 port
 
@@ -404,7 +425,7 @@ Ark 的 R 是嵌入式，并且它有自己的 startup 流程；你可以通过 
 
 ### 8.1 启动 Ark kernel
 命令形式（示例）：
-- `ark --connection_file <path/to/conn.json> --session-mode notebook`
+- `ark --connection_file <path/to/conn.json> --session-mode console`
 
 ### 8.2 启动 Ark LSP 的 comm_open
 - target_name：`positron.lsp`
