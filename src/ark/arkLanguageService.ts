@@ -7,7 +7,7 @@ import * as cp from 'child_process';
 import { URL } from 'url';
 import { Disposable, workspace, Uri, WorkspaceConfiguration, OutputChannel, window, WorkspaceFolder } from 'vscode';
 import { LanguageClient, LanguageClientOptions, StreamInfo, DocumentFilter, ErrorAction, CloseAction, RevealOutputChannelOn } from 'vscode-languageclient/node';
-import { createTempDir, spawn, DisposableProcess } from '../util';
+import { createTempDir, spawn, spawnAsync, DisposableProcess, getRpath } from '../util';
 import { extensionContext, tmpDir } from '../extension';
 
 interface ConnectionInfo {
@@ -103,6 +103,11 @@ export class ArkLanguageService implements Disposable {
         const env = Object.assign({}, process.env, {
             ARK_CONNECTION_FILE: connectionFile,
         });
+        const rHome = await this.resolveRHome();
+        if (rHome) {
+            env.R_HOME = rHome;
+            this.outputChannel.appendLine(`Resolved R_HOME for Ark: ${rHome}`);
+        }
 
         this.outputChannel.appendLine(`Starting Ark kernel with connection file ${connectionFile}`);
         this.arkProcess = spawn(arkPath, ['--connection_file', connectionFile, '--session-mode', sessionMode], { cwd, env });
@@ -115,6 +120,24 @@ export class ArkLanguageService implements Disposable {
         this.arkProcess.on('exit', (code, signal) => {
             this.outputChannel.appendLine(`Ark kernel exited ${signal ? `from signal ${signal}` : `with exit code ${code ?? 'null'}`}`);
         });
+    }
+
+    private async resolveRHome(): Promise<string | undefined> {
+        const rPath = await getRpath();
+        if (!rPath) {
+            return undefined;
+        }
+
+        const result = await spawnAsync(rPath, ['RHOME'], { env: process.env });
+        const lines = (result.stdout || '')
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0);
+        if (lines.length > 0) {
+            return lines[lines.length - 1];
+        }
+
+        return path.resolve(path.dirname(rPath), '..');
     }
 
     private async openArkLspComm(): Promise<number> {
