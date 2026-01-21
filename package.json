@@ -1406,6 +1406,15 @@
           "default": true,
           "markdownDescription": "Use multiple language servers for [multi-root workspaces](https://code.visualstudio.com/docs/editor/multi-root-workspaces). If disabled, only one language server will be used to handle all requests from all workspaces and files."
         },
+        "r.backend": {
+          "type": "string",
+          "default": "terminal",
+          "enum": [
+            "terminal",
+            "ark"
+          ],
+          "description": "Select the console backend. Use \"ark\" for the experimental Ark console integration."
+        },
         "r.ark.path": {
           "type": "string",
           "default": "",
