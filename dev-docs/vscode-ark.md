@@ -185,7 +185,8 @@ src/backends/
 - `r.ark.sessionsDir`: 会话元数据/connection file 根目录（默认扩展 globalStorage）
 - `r.ark.console.driver`: `tmux | external`（默认 tmux）
 - `r.ark.console.commandTemplate`: 默认 `jupyter console --existing {connectionFile}`
-- `r.ark.kernel.commandTemplate`: 默认 `{arkPath} --connection_file {connectionFile} --session-mode {sessionMode}`
+- `r.ark.kernel.commandTemplate`: 默认 `{arkPath} --connection_file {connectionFile} --session-mode {sessionMode} --startup-file {startupFile}`
+- `r.ark.kernel.startupFileTemplate`: 默认 `{sessionsDir}/{name}/init-ark.R`
 - `r.ark.tmux.path`: `tmux`（可配置为绝对路径）
 - `r.ark.tmux.sessionNameTemplate`: 默认 `vscode-ark-{name}`
 - `r.ark.tmux.manageKernel`: boolean，默认 true（在 tmux 内启动 Ark kernel）
@@ -226,12 +227,34 @@ src/backends/
 - `createdAt` / `lastAttachedAt`  
 - `mode`（tmux/external）  
 
+会话注册表的含义：  
+- 一个**持久化的索引文件**（例如 `r.ark.sessionsDir/registry.json`）  
+- 只记录“如何找到 kernel”的最小信息，供 `r.ark.attachSession` 快速选择  
+- 不依赖 console 输出或 supervisor  
+
 VSCode 重启后：  
 - `r.ark.attachSession` 从注册表选择会话并附加  
 - 或直接粘贴/选择 `connection.json`  
 
 建议在 Ark 启动时设置环境变量：  
 - `ARK_CONNECTION_FILE=<path>`（便于用户在 console 中查到）  
+
+### 8.3 `--startup-file` + announce 机制
+为避免依赖终端输出，Ark 启动时通过 `--startup-file` 注入一个**最小 R 脚本**，用于“announce”当前 session：  
+- 扩展生成 `init-ark.R`（路径由 `r.ark.kernel.startupFileTemplate` 决定）  
+- 脚本读取 `ARK_CONNECTION_FILE` 并写入 `announce.json`  
+- 文件位置建议为：`r.ark.sessionsDir/<name>/announce.json`  
+
+示例字段（JSON）：  
+- `sessionName`  
+- `connectionFilePath`  
+- `pid`  
+- `startedAt`  
+
+扩展在创建/附加时：  
+- 监听或轮询 `announce.json`  
+- 将内容写入会话注册表  
+- 用 `connectionFilePath` 完成 attach  
 
 ---
 
