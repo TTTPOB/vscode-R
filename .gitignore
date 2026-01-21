@@ -17,3 +17,6 @@ temp.*
 tmp
 temp
 ark-sidecar/target
+# pixi environments
+.pixi/*
+!.pixi/config.toml
