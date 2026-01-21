@@ -1,6 +1,6 @@
 # 在 vscode-r 中引入 Ark backend 的设计（重写版）
 
-本文是对 `dev-docs/vscode-ark.md` 的**完整重写**，结合最新调研（Positron/Ark 会话模式、Positron R 扩展结构、会话持久策略）给出**可落地的架构方案**与**大规模重构计划**。
+本文是对 `dev-docs/vscode-ark.md` 的**完整重写**，结合最新调研（Positron/Ark 会话模式、Positron R 扩展结构、会话持久策略）给出**可落地的架构方案**与**大规模重构计划**。并已按确认偏好更新：**Ark backend 作为可选后端**、**HTML/data explorer 使用 Positron webview**、**sidecar 使用 Rust**。
 
 目标：
 - 在现有 `vscode-r` 扩展中新增 **Ark backend**，并**借用 positron-r 扩展的关键实现**（LSP/comm/data explorer/htmlwidgets 等）
@@ -12,9 +12,10 @@
 ## 1. 结论摘要
 
 1) **不做“完整移植 positron-r 新插件”**。Positron R 扩展依赖 Positron 自研 runtime/supervisor API，VSCode 中无等价层；完整移植意味着重建“Kernel Supervisor + Runtime API + Session 体系”，成本巨大且重复造轮子。  
-2) **在现有 vscode-r 中新增 Ark backend，局部借用 positron-r 代码**。把 Positron/Ark 的“能力点”作为 backend 能力接入（LSP、data explorer、htmlwidgets、plot），而非移植框架。  
+2) **在现有 vscode-r 中新增 Ark backend（可选后端）**，局部借用 positron-r 代码。把 Positron/Ark 的“能力点”作为 backend 能力接入（LSP、data explorer、htmlwidgets、plot），而非移植框架。  
 3) **会话持久性继续由 tmux + jupyter console 提供**。Positron 的持久机制是 “Supervisor 常驻 + session 复连”，与 tmux 习惯不同；我们选择保留 tmux，并让 VSCode 作为“第二前端”附加到同一 kernel。  
-4) **统一使用 Ark Console 模式（`--session-mode console`）**，这是 Ark IDE 集成默认路径，必须处理 Console 模式的输出差异（ShowHtmlFile/中途 autoprint/动态 plot）。
+4) **统一使用 Ark Console 模式（`--session-mode console`）**，这是 Ark IDE 集成默认路径，必须处理 Console 模式的输出差异（ShowHtmlFile/中途 autoprint/动态 plot）。  
+5) **Rust sidecar 作为验证过的实现路径**（已有部分基础），避免 Node ZMQ 依赖。
 
 ---
 
@@ -41,12 +42,13 @@
 ## 3. 设计目标与非目标
 
 ### 3.1 目标
-- 在 vscode-r 中新增 **Ark backend**：
+- 在 vscode-r 中新增 **Ark backend（可选后端）**：
   - 支持 LSP、plot、data explorer、HTML/widget 输出
   - 作为 `jupyter console` 的“旁路客户端”
 - 保留 tmux + `jupyter console` 的**会话持久**
 - 能在 Console 模式下稳定运行
 - 尽量复用 / 借用 positron-r 的能力实现
+- 使用 **Rust sidecar** 承担 Jupyter/ZMQ/comm 细节
 
 ### 3.2 非目标
 - 不迁移 Positron 的 Kernel Supervisor 体系
@@ -62,7 +64,7 @@
 ┌──────────────────────────────────────────────────────────┐
 │ VSCode (vscode-r)                                        │
 │  - Ark backend (new)                                     │
-│  - sidecar / embedded Jupyter client                     │
+│  - Rust sidecar (Jupyter client/comm)                    │
 │  - LSP client (vscode-languageclient)                    │
 │  - Plot/Data/HTML viewer (webview)                       │
 └──────────────────────────────────────────────────────────┘
@@ -84,6 +86,8 @@
 - **Ark kernel 由 VSCode 启动或附加**（推荐由 VSCode 生成 connection file）。
 - `jupyter console` 作为 REPL 前端，可运行于 tmux，**会话持久**。
 - VSCode 作为“第二个 Jupyter client”，负责 LSP/plot/data/HTML 输出。
+- **Ark backend 为可选后端**，默认仍保留 `terminal` backend。
+- Jupyter/ZMQ 细节由 **Rust sidecar** 承担，扩展只与其做轻量 RPC。
 
 ---
 
@@ -106,11 +110,11 @@
 
 ### 6.2 Data Explorer
 - 复用：`positron.dataExplorer` comm 协议（RPC）
-- 实现：VSCode webview 前端 + comm 代理，支持 `GetState/GetSchema/GetDataValues/SetSortColumns/SetRowFilters`
+- 实现：**移植 Positron Data Explorer webview 前端** + comm 代理，支持 `GetState/GetSchema/GetDataValues/SetSortColumns/SetRowFilters`
 
 ### 6.3 HTML / htmlwidgets
-- 复用：Positron 的 htmlwidgets 消息结构与资源根管理思路
-- Console 模式：需处理 `ShowHtmlFile` 消息，映射到 Viewer
+- 复用：**Positron webview 渲染逻辑**（htmlwidgets 消息结构与资源根管理）
+- Console 模式：处理 `ShowHtmlFile` 消息，映射到 Positron webview
 
 ### 6.4 Plot
 - 当 UI comm 不可用时：解析 `display_data` 的 `image/png` 路径字符串并读取文件
@@ -129,6 +133,7 @@
   - `IRBackend` / `IRConsoleBackend` / `IRLspBackend` / `IRPlotBackend` / `IRDataBackend`
 - 将现有 Terminal + languageserver 逻辑封装为 `TerminalBackend`
 - 将 Ark 相关逻辑隔离到 `ArkBackend`
+- 定义 **Rust sidecar** 与扩展之间的 RPC/协议层（最小可用 API）
 
 #### Phase 1：Ark LSP only（最低风险落地）
 - Ark backend 只实现 `positron.lsp` comm
@@ -137,11 +142,11 @@
 
 #### Phase 2：Plot & HTML
 - 接入 `display_data` / `ShowHtmlFile`
-- 新建 viewer/webview 管道
+- 对接 **Positron webview** 组件
 - 仍不触碰 console
 
 #### Phase 3：Data Explorer
-- 引入 `positron.dataExplorer` comm 与 webview UI
+- 引入 `positron.dataExplorer` comm 与 **Positron Data Explorer webview**
 
 #### Phase 4：Console（可选）
 - 仅在你希望 VSCode 内部也能执行时再实现
@@ -152,11 +157,11 @@
 #### 7.2.1 新增目录结构（建议）
 ```
 src/ark/
-  kernelClient.ts       # Jupyter client/comm（或 sidecar 代理）
+  kernelClient.ts       # Jupyter client/comm（Rust sidecar 代理）
   lsp.ts                # positron.lsp 启动逻辑
   plots.ts              # display_data / positron.plot
-  html.ts               # ShowHtmlFile / htmlwidgets
-  dataExplorer.ts       # data explorer comm
+  html.ts               # ShowHtmlFile / htmlwidgets（Positron webview）
+  dataExplorer.ts       # data explorer comm（Positron webview）
   backend.ts            # ArkBackend 实现
 src/backends/
   terminal.ts           # 现有 terminal backend 迁移
@@ -170,7 +175,7 @@ src/backends/
 - `package.json`：新增配置项与命令
 
 ### 7.3 配置项建议
-- `r.backend`: `terminal | ark`
+- `r.backend`: `terminal | ark`（默认 terminal）
 - `r.ark.path`: Ark 可执行路径
 - `r.ark.sessionMode`: `console | notebook`（默认 console）
 - `r.ark.ipAddress`: 默认 `127.0.0.1`
@@ -190,19 +195,12 @@ src/backends/
 
 ---
 
-## 9. 风险与不确定点（需确认）
+## 9. 已确认的设计决策
 
-1) **你是否希望完全禁用 vscode-r 自带 console？**
-   - 目前方案是假设 console 由 `jupyter console` 承担，VSCode 只旁路。
-
-2) **htmlwidgets 的渲染方案**：
-   - 是直接借用 Positron 的 webview 逻辑，还是用更轻量的自定义 viewer？
-
-3) **data explorer UI**：
-   - 是否考虑直接移植 Positron 前端（如果许可可行），还是复用现有 vscode-r data viewer？
-
-4) **sidecar 形态**：
-   - 你倾向 Rust sidecar（避免 Node ZMQ），还是直接 Node ZMQ？
+1) **Ark backend 作为可选后端**（默认仍保留 vscode-r 终端 backend）。  
+2) **HTML/htmlwidgets 使用 Positron webview 方案**。  
+3) **Data Explorer 使用 Positron Data Explorer 前端**。  
+4) **sidecar 使用 Rust 实现**（已有部分基础）。
 
 ---
 
@@ -218,5 +216,4 @@ src/backends/
 
 ## 11. 下一步
 
-- 你确认第 9 节的不确定项后，我会把这个设计继续落地到具体模块级计划与接口草案（甚至直接开始 Phase 0 重构）。
-
+- 进入 Phase 0：定义 backend 接口与 Rust sidecar API，拆分 `TerminalBackend` 与 `ArkBackend`。
