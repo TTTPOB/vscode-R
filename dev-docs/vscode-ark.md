@@ -6,6 +6,7 @@
 - 在现有 `vscode-r` 扩展中新增 **Ark backend**，并**借用 positron-r 扩展的关键实现**（LSP/comm/data explorer/htmlwidgets 等）
 - 保留你现有的 **tmux + jupyter console** 工作流，确保会话持久能力
 - 避免移植 Positron 的整套 runtime/supervisor 生态（成本高、与 vscode-r 重叠）
+- **默认在受管 tmux 会话中创建 Ark session**（可配置），提供 `create ark session` 命令让用户输入名字
 
 ---
 
@@ -15,7 +16,8 @@
 2) **在现有 vscode-r 中新增 Ark backend（可选后端）**，局部借用 positron-r 代码。把 Positron/Ark 的“能力点”作为 backend 能力接入（LSP、data explorer、htmlwidgets、plot），而非移植框架。  
 3) **会话持久性继续由 tmux + jupyter console 提供**。Positron 的持久机制是 “Supervisor 常驻 + session 复连”，与 tmux 习惯不同；我们选择保留 tmux，并让 VSCode 作为“第二前端”附加到同一 kernel。  
 4) **统一使用 Ark Console 模式（`--session-mode console`）**，这是 Ark IDE 集成默认路径，必须处理 Console 模式的输出差异（ShowHtmlFile/中途 autoprint/动态 plot）。  
-5) **Rust sidecar 作为验证过的实现路径**（已有部分基础），避免 Node ZMQ 依赖。
+5) **Rust sidecar 作为验证过的实现路径**（已有部分基础），避免 Node ZMQ 依赖。  
+6) **默认用受管 tmux 会话创建并托管 Ark 会话**，确保 VSCode 退出后仍可复连（可配置为外部 console 或非 tmux）。
 
 ---
 
@@ -88,6 +90,7 @@
 - VSCode 作为“第二个 Jupyter client”，负责 LSP/plot/data/HTML 输出。
 - **Ark backend 为可选后端**，默认仍保留 `terminal` backend。
 - Jupyter/ZMQ 细节由 **Rust sidecar** 承担，扩展只与其做轻量 RPC。
+- **会话持久由 tmux 托管**，扩展不承担 supervisor/daemon 管理。
 
 ---
 
@@ -179,32 +182,82 @@ src/backends/
 - `r.ark.path`: Ark 可执行路径
 - `r.ark.sessionMode`: `console | notebook`（默认 console）
 - `r.ark.ipAddress`: 默认 `127.0.0.1`
+- `r.ark.sessionsDir`: 会话元数据/connection file 根目录（默认扩展 globalStorage）
+- `r.ark.console.driver`: `tmux | external`（默认 tmux）
+- `r.ark.console.commandTemplate`: 默认 `jupyter console --existing {connectionFile}`
+- `r.ark.kernel.commandTemplate`: 默认 `{arkPath} --connection_file {connectionFile} --session-mode {sessionMode}`
+- `r.ark.tmux.path`: `tmux`（可配置为绝对路径）
+- `r.ark.tmux.sessionNameTemplate`: 默认 `vscode-ark-{name}`
+- `r.ark.tmux.manageKernel`: boolean，默认 true（在 tmux 内启动 Ark kernel）
+- `r.ark.tmux.extraArgs`: 传给 tmux 的附加参数
+
+### 7.4 命令设计（新增）
+- `r.ark.createSession`：提示输入 session 名称，创建并启动 Ark 会话（默认在 tmux 中托管）
+- `r.ark.attachSession`：从已知会话列表选择并附加（或粘贴 connection file 路径）
+- `r.ark.stopSession`：停止 Ark 会话（可选：关闭 tmux session）
+- `r.ark.openConsole`：打开/附加 tmux console（或外部 console）
 
 ---
 
 ## 8. 会话持久策略（与 tmux 对齐）
 
-### 8.1 保留 tmux + jupyter console
-- VSCode 启动 Ark kernel 并生成 connection file
-- tmux 内运行 `jupyter console --existing <connection_file>`
-- VSCode 作为旁路客户端连接同一 kernel
+### 8.1 默认：受管 tmux 会话
+默认流程（`r.ark.console.driver=tmux` 且 `r.ark.tmux.manageKernel=true`）：  
+1) 用户执行 `r.ark.createSession`  
+2) 扩展提示输入 session 名称（例如 `analysis`）  
+3) 生成 connection file（写入 `r.ark.sessionsDir/<name>/connection.json`）  
+4) 通过 tmux 创建会话（`vscode-ark-<name>`），并在 tmux 内启动：  
+   - **Window 1**：`ark --connection_file <path> --session-mode console`  
+   - **Window 2**：`jupyter console --existing <path>`  
+5) 扩展/sidecar 通过 connection file 作为第二前端附加  
 
-### 8.2 VSCode 与会话复连
-- 如果 VSCode 重启，只需“重新 attach connection file”
-- 通过环境变量或命令提供 connection file 路径（如 `ARK_CONNECTION_FILE`）
+优势：  
+- Ark kernel 与 console 都在 tmux 内，**VSCode 关闭也不会停止会话**  
+- 无需引入 Supervisor/daemon  
+
+可配置变体：  
+- `r.ark.tmux.manageKernel=false`：Ark 由扩展/sidecar 启动，tmux 仅管理 console  
+- `r.ark.console.driver=external`：不创建 tmux，用户自行启动 console（仍可通过 connection file 附加）  
+
+### 8.2 会话元数据与复连
+扩展维护会话注册表（存储在 `r.ark.sessionsDir` 或 globalStorage）：  
+- `sessionName` / `tmuxSessionName`  
+- `connectionFilePath`  
+- `createdAt` / `lastAttachedAt`  
+- `mode`（tmux/external）  
+
+VSCode 重启后：  
+- `r.ark.attachSession` 从注册表选择会话并附加  
+- 或直接粘贴/选择 `connection.json`  
+
+建议在 Ark 启动时设置环境变量：  
+- `ARK_CONNECTION_FILE=<path>`（便于用户在 console 中查到）  
 
 ---
 
-## 9. 已确认的设计决策
+## 9. Console 选择评估：Positron console vs jupyter console
+
+结论：**仍以 `jupyter console` 为首选 REPL**。原因：  
+- Positron console 依赖 Positron 专用 API（如 `positron.window.getConsoleForLanguage`），VSCode 中没有等价 UI 层  
+- 复用 Positron console 意味着移植/重写其 console UI 与 runtime 绑定逻辑，工作量与风险高  
+- `jupyter console + tmux` 已满足“持久会话 + 可 attach/detach”的核心需求，并与 Ark kernel 原生兼容  
+
+可选项（未来）：  
+- 在 VSCode 内实现 PseudoTerminal 或 webview console，但作为**次要前端**  
+
+---
+
+## 10. 已确认的设计决策
 
 1) **Ark backend 作为可选后端**（默认仍保留 vscode-r 终端 backend）。  
 2) **HTML/htmlwidgets 使用 Positron webview 方案**。  
 3) **Data Explorer 使用 Positron Data Explorer 前端**。  
 4) **sidecar 使用 Rust 实现**（已有部分基础）。
+5) **不引入 supervisor**，会话持久由 tmux 与 connection file 管理。
 
 ---
 
-## 10. 验证清单（建议）
+## 11. 验证清单（建议）
 
 - LSP：completion/diagnostics/hover/definition
 - Plot：`plot(1:10)` → display_data / dynamic plot
@@ -214,6 +267,6 @@ src/backends/
 
 ---
 
-## 11. 下一步
+## 12. 下一步
 
 - 进入 Phase 0：定义 backend 接口与 Rust sidecar API，拆分 `TerminalBackend` 与 `ArkBackend`。
