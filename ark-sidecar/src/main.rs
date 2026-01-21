@@ -7,11 +7,14 @@ use tokio::runtime::Builder;
 use uuid::Uuid;
 
 use runtimelib::{
-    create_client_iopub_connection, create_client_shell_connection, CommId, CommOpen,
-    ConnectionInfo, JupyterMessage, JupyterMessageContent,
+    create_client_iopub_connection, CommId, CommOpen, Connection, ConnectionInfo, JupyterMessage,
+    JupyterMessageContent,
 };
+use std::str::FromStr;
+use zeromq::util::PeerIdentity;
+use zeromq::{DealerSocket, Socket as ZmqSocket, SocketOptions};
 
-const LSP_COMM_TARGET: &str = "lsp";
+const LSP_COMM_TARGET: &str = "positron.lsp";
 const DEFAULT_TIMEOUT_MS: u64 = 15000;
 const SUPPORTED_SIGNATURE_SCHEME: &str = "hmac-sha256";
 
@@ -55,7 +58,8 @@ fn run() -> Result<()> {
         ));
     }
 
-    let runtime = Builder::new_current_thread()
+    let runtime = Builder::new_multi_thread()
+        .worker_threads(2)
         .enable_all()
         .build()
         .context("Failed to build Tokio runtime")?;
@@ -65,7 +69,7 @@ fn run() -> Result<()> {
         let mut iopub = create_client_iopub_connection(&connection, "", &session_id)
             .await
             .context("Failed to connect iopub")?;
-        let mut shell = create_client_shell_connection(&connection, &session_id)
+        let mut shell = create_shell_connection(&connection, &session_id)
             .await
             .context("Failed to connect shell")?;
 
@@ -151,6 +155,24 @@ async fn send_comm_open(
     shell.send(message).await.context("Failed to send comm_open")
 }
 
+async fn create_shell_connection(
+    connection_info: &ConnectionInfo,
+    session_id: &str,
+) -> Result<runtimelib::ClientShellConnection> {
+    let mut options = SocketOptions::default();
+    let identity = PeerIdentity::from_str(&format!("sidecar-{}", Uuid::new_v4()))
+        .context("Failed to create peer identity")?;
+    options.peer_identity(identity);
+
+    let mut socket = DealerSocket::with_options(options);
+    socket
+        .connect(&connection_info.shell_url())
+        .await
+        .context("Failed to connect shell socket")?;
+
+    Ok(Connection::new(socket, &connection_info.key, session_id))
+}
+
 async fn wait_for_iopub_welcome(
     iopub: &mut runtimelib::ClientIoPubConnection,
     timeout: Duration,
@@ -166,7 +188,14 @@ async fn wait_for_iopub_welcome(
         let message = tokio::time::timeout(remaining, iopub.read())
             .await
             .map_err(|_| anyhow!("Timed out waiting for iopub_welcome"))??;
+        if debug_enabled() {
+            log_debug(&format!(
+                "Sidecar: iopub message while waiting for welcome: {}",
+                message.content.message_type()
+            ));
+        }
         if matches!(message.content, JupyterMessageContent::IoPubWelcome(_)) {
+            log_debug("Sidecar: received iopub_welcome");
             return Ok(());
         }
     }
@@ -189,11 +218,33 @@ async fn wait_for_comm_port(
             .await
             .map_err(|_| anyhow!("Timed out waiting for Ark LSP comm response"))??;
         let JupyterMessage { content, .. } = message;
+        if debug_enabled() {
+            log_debug(&format!(
+                "Sidecar: iopub message while waiting for port: {}",
+                content.message_type()
+            ));
+        }
+        if let JupyterMessageContent::Stream(stream) = &content {
+            if debug_enabled() {
+                log_debug(&format!(
+                    "Sidecar: iopub stream ({:?}): {}",
+                    stream.name, stream.text
+                ));
+            }
+        }
         let JupyterMessageContent::CommMsg(comm_msg) = content else {
+            if let JupyterMessageContent::CommClose(comm_close) = content {
+                if comm_close.comm_id.0 == comm_id {
+                    return Err(anyhow!("Comm closed before LSP port was received"));
+                }
+            }
             continue;
         };
         if comm_msg.comm_id.0 != comm_id {
             continue;
+        }
+        if debug_enabled() {
+            log_debug(&format!("Sidecar: comm_msg data: {}", Value::Object(comm_msg.data.clone())));
         }
         if let Some(port) = extract_comm_port(&comm_msg.data) {
             return Ok(port);

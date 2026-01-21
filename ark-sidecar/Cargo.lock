@@ -814,6 +814,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
+ "zeromq",
 ]
 
 [[package]]
