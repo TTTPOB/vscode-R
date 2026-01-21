@@ -9,6 +9,7 @@ import { Disposable, workspace, Uri, WorkspaceConfiguration, OutputChannel, wind
 import { LanguageClient, LanguageClientOptions, StreamInfo, DocumentFilter, ErrorAction, CloseAction, RevealOutputChannelOn } from 'vscode-languageclient/node';
 import { createTempDir, spawn, spawnAsync, DisposableProcess, getRpath } from '../util';
 import { extensionContext, tmpDir } from '../extension';
+import * as sessionRegistry from './sessionRegistry';
 
 interface ConnectionInfo {
     shell_port: number;
@@ -92,6 +93,13 @@ export class ArkLanguageService implements Disposable {
 
     private async startArkKernel(cwd: string): Promise<void> {
         if (this.arkProcess) {
+            return;
+        }
+
+        const activeSession = sessionRegistry.getActiveSession();
+        if (activeSession && fs.existsSync(activeSession.connectionFilePath)) {
+            this.connectionFile = activeSession.connectionFilePath;
+            this.outputChannel.appendLine(`Using Ark session connection file ${activeSession.connectionFilePath}`);
             return;
         }
 
@@ -360,8 +368,8 @@ export class ArkLanguageService implements Disposable {
                 // Ignore cleanup errors.
             }
             this.connectionDir = undefined;
-            this.connectionFile = undefined;
         }
+        this.connectionFile = undefined;
 
         await Promise.allSettled(promises);
     }

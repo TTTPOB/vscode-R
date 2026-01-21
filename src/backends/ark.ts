@@ -6,19 +6,10 @@ import * as vscode from 'vscode';
 import * as util from '../util';
 import { extensionContext } from '../extension';
 import * as selection from '../selection';
+import * as sessionRegistry from '../ark/sessionRegistry';
+import type { ArkConsoleDriver, ArkSessionEntry } from '../ark/sessionRegistry';
 import type { IRConsoleBackend } from './types';
-
-type ArkConsoleDriver = 'tmux' | 'external';
 type ArkSessionMode = 'console' | 'notebook' | 'background';
-
-interface ArkSessionEntry {
-    name: string;
-    mode: ArkConsoleDriver;
-    connectionFilePath: string;
-    tmuxSessionName?: string;
-    createdAt: string;
-    lastAttachedAt?: string;
-}
 
 const DEFAULT_SIGNATURE_SCHEME = 'hmac-sha256';
 const DEFAULT_SESSION_MODE: ArkSessionMode = 'console';
@@ -66,7 +57,6 @@ export class ArkConsoleBackend implements IRConsoleBackend {
     readonly id = 'ark' as const;
     private readonly outputChannel = vscode.window.createOutputChannel('Ark Console');
     private readonly externalTerminals = new Map<string, vscode.Terminal>();
-    private activeSessionName: string | undefined;
 
     getCommandHandlers(): Record<string, (...args: unknown[]) => unknown> {
         return {
@@ -98,12 +88,8 @@ export class ArkConsoleBackend implements IRConsoleBackend {
         this.outputChannel.dispose();
     }
 
-    private showNotReady(command: string): void {
-        void vscode.window.showWarningMessage(`Ark console backend 未实现命令 ${command}。请先通过 Ark 会话命令创建/附加会话。`);
-    }
-
     private setActiveSession(name: string): void {
-        this.activeSessionName = name;
+        sessionRegistry.setActiveSessionName(name);
     }
 
     private async runSource(echo: boolean): Promise<void> {
@@ -246,9 +232,10 @@ export class ArkConsoleBackend implements IRConsoleBackend {
             return;
         }
 
-        const executed = await this.tryExecuteViaSidecar(entry.connectionFilePath, text);
+        const forceConsole = this.isAttachRequest(text);
+        const executed = forceConsole ? false : await this.tryExecuteViaSidecar(entry.connectionFilePath, text);
         if (executed) {
-            this.updateRegistryAttachment(entry.name);
+            sessionRegistry.updateSessionAttachment(entry.name, nowIso());
             this.setActiveSession(entry.name);
             return;
         }
@@ -280,8 +267,12 @@ export class ArkConsoleBackend implements IRConsoleBackend {
             resolved.sendText(text, execute);
         }
 
-        this.updateRegistryAttachment(entry.name);
+        sessionRegistry.updateSessionAttachment(entry.name, nowIso());
         this.setActiveSession(entry.name);
+    }
+
+    private isAttachRequest(text: string): boolean {
+        return /\b\.?vsc\.attach\s*\(/.test(text);
     }
 
     private resolveSidecarPath(): string {
@@ -325,60 +316,6 @@ export class ArkConsoleBackend implements IRConsoleBackend {
             return false;
         }
         return true;
-    }
-
-    private getSessionsDir(): string {
-        const configured = util.substituteVariables((util.config().get<string>('ark.sessionsDir') || '').trim());
-        const baseDir = configured || path.join(extensionContext.globalStorageUri.fsPath, 'ark-sessions');
-        fs.mkdirSync(baseDir, { recursive: true });
-        return baseDir;
-    }
-
-    private getRegistryPath(): string {
-        return path.join(this.getSessionsDir(), 'registry.json');
-    }
-
-    private loadRegistry(): ArkSessionEntry[] {
-        const registryPath = this.getRegistryPath();
-        if (!fs.existsSync(registryPath)) {
-            return [];
-        }
-        try {
-            const content = fs.readFileSync(registryPath, 'utf8');
-            const parsed = JSON.parse(content);
-            if (Array.isArray(parsed)) {
-                return parsed as ArkSessionEntry[];
-            }
-        } catch (err) {
-            this.outputChannel.appendLine(`Failed to read registry: ${String(err)}`);
-        }
-        return [];
-    }
-
-    private saveRegistry(entries: ArkSessionEntry[]): void {
-        const registryPath = this.getRegistryPath();
-        fs.mkdirSync(path.dirname(registryPath), { recursive: true });
-        fs.writeFileSync(registryPath, JSON.stringify(entries, null, 2));
-    }
-
-    private upsertRegistry(entry: ArkSessionEntry): void {
-        const registry = this.loadRegistry();
-        const idx = registry.findIndex((item) => item.name === entry.name);
-        if (idx >= 0) {
-            registry[idx] = entry;
-        } else {
-            registry.push(entry);
-        }
-        this.saveRegistry(registry);
-    }
-
-    private updateRegistryAttachment(name: string): void {
-        const registry = this.loadRegistry();
-        const idx = registry.findIndex((item) => item.name === name);
-        if (idx >= 0) {
-            registry[idx].lastAttachedAt = nowIso();
-            this.saveRegistry(registry);
-        }
     }
 
     private getArkPath(): string {
@@ -453,7 +390,7 @@ export class ArkConsoleBackend implements IRConsoleBackend {
         }
 
         const sessionName = normalizeSessionName(nameInput);
-        const sessionsDir = this.getSessionsDir();
+        const sessionsDir = sessionRegistry.getSessionsDir();
         const sessionDir = path.join(sessionsDir, sessionName);
         if (fs.existsSync(sessionDir)) {
             const choice = await vscode.window.showWarningMessage(
@@ -486,7 +423,7 @@ export class ArkConsoleBackend implements IRConsoleBackend {
             tmuxSessionName = created;
         }
 
-        this.upsertRegistry({
+        sessionRegistry.upsertSession({
             name: sessionName,
             mode: driver,
             connectionFilePath: connectionFile,
@@ -504,7 +441,7 @@ export class ArkConsoleBackend implements IRConsoleBackend {
     }
 
     private async attachSession(): Promise<void> {
-        const registry = this.loadRegistry();
+        const registry = sessionRegistry.loadRegistry();
         const pickItems = registry.map((entry) => ({
             label: entry.name,
             description: entry.mode === 'tmux' ? entry.tmuxSessionName : 'external',
@@ -524,7 +461,7 @@ export class ArkConsoleBackend implements IRConsoleBackend {
     }
 
     private async openConsole(): Promise<void> {
-        const registry = this.loadRegistry();
+        const registry = sessionRegistry.loadRegistry();
         if (registry.length === 0) {
             void vscode.window.showInformationMessage('No Ark sessions found. Use "Create Ark session" first.');
             return;
@@ -540,7 +477,7 @@ export class ArkConsoleBackend implements IRConsoleBackend {
     }
 
     private async stopSession(): Promise<void> {
-        const registry = this.loadRegistry();
+        const registry = sessionRegistry.loadRegistry();
         if (registry.length === 0) {
             void vscode.window.showInformationMessage('No Ark sessions found.');
             return;
@@ -563,12 +500,15 @@ export class ArkConsoleBackend implements IRConsoleBackend {
         }
 
         const nextRegistry = registry.filter((item) => item.name !== entry.name);
-        this.saveRegistry(nextRegistry);
+        sessionRegistry.saveRegistry(nextRegistry);
+        if (sessionRegistry.getActiveSessionName() === entry.name) {
+            sessionRegistry.setActiveSessionName(undefined);
+        }
         void vscode.window.showInformationMessage(`Stopped Ark session "${entry.name}".`);
     }
 
     private async openConsoleByName(name: string): Promise<void> {
-        const registry = this.loadRegistry();
+        const registry = sessionRegistry.loadRegistry();
         const entry = registry.find((item) => item.name === name);
         if (!entry) {
             void vscode.window.showErrorMessage(`Ark session "${name}" not found in registry.`);
@@ -589,7 +529,7 @@ export class ArkConsoleBackend implements IRConsoleBackend {
             await this.openExternalConsole(entry.connectionFilePath, name);
         }
 
-        this.updateRegistryAttachment(name);
+        sessionRegistry.updateSessionAttachment(name, nowIso());
         this.setActiveSession(name);
     }
 
@@ -717,7 +657,7 @@ export class ArkConsoleBackend implements IRConsoleBackend {
     }
 
     private async pickSessionForExecution(): Promise<ArkSessionEntry | undefined> {
-        const registry = this.loadRegistry();
+        const registry = sessionRegistry.loadRegistry();
         if (registry.length === 0) {
             const choice = await vscode.window.showInformationMessage(
                 'No Ark sessions found. Create one now?',
@@ -730,8 +670,9 @@ export class ArkConsoleBackend implements IRConsoleBackend {
             return undefined;
         }
 
-        if (this.activeSessionName) {
-            const entry = registry.find((item) => item.name === this.activeSessionName);
+        const activeName = sessionRegistry.getActiveSessionName();
+        if (activeName) {
+            const entry = registry.find((item) => item.name === activeName);
             if (entry) {
                 return entry;
             }
