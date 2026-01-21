@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import * as util from '../util';
 import { extensionContext } from '../extension';
+import * as selection from '../selection';
 import type { IRConsoleBackend } from './types';
 
 type ArkConsoleDriver = 'tmux' | 'external';
@@ -63,6 +64,8 @@ function renderShellTemplate(template: string, values: Record<string, string>): 
 export class ArkConsoleBackend implements IRConsoleBackend {
     readonly id = 'ark' as const;
     private readonly outputChannel = vscode.window.createOutputChannel('Ark Console');
+    private readonly externalTerminals = new Map<string, vscode.Terminal>();
+    private activeSessionName: string | undefined;
 
     getCommandHandlers(): Record<string, (...args: unknown[]) => unknown> {
         return {
@@ -71,22 +74,22 @@ export class ArkConsoleBackend implements IRConsoleBackend {
             'r.ark.attachSession': () => this.attachSession(),
             'r.ark.openConsole': () => this.openConsole(),
             'r.ark.stopSession': () => this.stopSession(),
-            'r.nrow': () => this.showNotReady('r.nrow'),
-            'r.length': () => this.showNotReady('r.length'),
-            'r.head': () => this.showNotReady('r.head'),
-            'r.thead': () => this.showNotReady('r.thead'),
-            'r.names': () => this.showNotReady('r.names'),
-            'r.view': () => this.showNotReady('r.view'),
-            'r.runSource': () => this.showNotReady('r.runSource'),
-            'r.runSelection': () => this.showNotReady('r.runSelection'),
-            'r.runFromLineToEnd': () => this.showNotReady('r.runFromLineToEnd'),
-            'r.runFromBeginningToLine': () => this.showNotReady('r.runFromBeginningToLine'),
-            'r.runSelectionRetainCursor': () => this.showNotReady('r.runSelectionRetainCursor'),
-            'r.runCommandWithSelectionOrWord': () => this.showNotReady('r.runCommandWithSelectionOrWord'),
-            'r.runCommandWithEditorPath': () => this.showNotReady('r.runCommandWithEditorPath'),
-            'r.runCommand': () => this.showNotReady('r.runCommand'),
-            'r.runSourcewithEcho': () => this.showNotReady('r.runSourcewithEcho'),
-            'r.runChunks': () => this.showNotReady('r.runChunks'),
+            'r.nrow': () => this.runSelectionOrWord(['nrow']),
+            'r.length': () => this.runSelectionOrWord(['length']),
+            'r.head': () => this.runSelectionOrWord(['head']),
+            'r.thead': () => this.runSelectionOrWord(['t', 'head']),
+            'r.names': () => this.runSelectionOrWord(['names']),
+            'r.view': () => this.runSelectionOrWord(['View']),
+            'r.runSource': () => { void this.runSource(false); },
+            'r.runSelection': () => { void this.runSelection(); },
+            'r.runFromLineToEnd': () => { void this.runFromLineToEnd(); },
+            'r.runFromBeginningToLine': () => { void this.runFromBeginningToLine(); },
+            'r.runSelectionRetainCursor': () => { void this.runSelectionRetainCursor(); },
+            'r.runCommandWithSelectionOrWord': (command: string) => { void this.runCommandWithSelectionOrWord(command); },
+            'r.runCommandWithEditorPath': (command: string) => { void this.runCommandWithEditorPath(command); },
+            'r.runCommand': (command: string) => { void this.runCommand(command); },
+            'r.runSourcewithEcho': () => { void this.runSource(true); },
+            'r.runChunks': (chunks: vscode.Range[]) => { void this.runChunks(chunks); },
         };
     }
 
@@ -96,6 +99,181 @@ export class ArkConsoleBackend implements IRConsoleBackend {
 
     private showNotReady(command: string): void {
         void vscode.window.showWarningMessage(`Ark console backend 未实现命令 ${command}。请先通过 Ark 会话命令创建/附加会话。`);
+    }
+
+    private setActiveSession(name: string): void {
+        this.activeSessionName = name;
+    }
+
+    private async runSource(echo: boolean): Promise<void> {
+        const wad = vscode.window.activeTextEditor?.document;
+        if (!wad) {
+            return;
+        }
+        const isSaved = await util.saveDocument(wad);
+        if (!isSaved) {
+            return;
+        }
+        let rPath: string = util.ToRStringLiteral(wad.fileName, '"');
+        let encodingParam = util.config().get<string>('source.encoding');
+        if (encodingParam === undefined) {
+            return;
+        }
+        encodingParam = `encoding = "${encodingParam}"`;
+        const echoParam = util.config().get<boolean>('source.echo');
+        rPath = [rPath, encodingParam].join(', ');
+        if (echoParam) {
+            echo = true;
+        }
+        if (echo) {
+            rPath = [rPath, 'echo = TRUE'].join(', ');
+        }
+        await this.runTextInArk(`source(${rPath})`);
+    }
+
+    private async runSelection(): Promise<void> {
+        await this.runSelectionInArk(true);
+    }
+
+    private async runSelectionRetainCursor(): Promise<void> {
+        await this.runSelectionInArk(false);
+    }
+
+    private async runSelectionOrWord(rFunctionName: string[]): Promise<void> {
+        const text = selection.getWordOrSelection();
+        if (!text) {
+            return;
+        }
+        const wrappedText = selection.surroundSelection(text, rFunctionName);
+        await this.runTextInArk(wrappedText);
+    }
+
+    private async runCommandWithSelectionOrWord(rCommand: string): Promise<void> {
+        const text = selection.getWordOrSelection();
+        if (!text) {
+            return;
+        }
+        const call = rCommand.replace(/\$\$/g, text);
+        await this.runTextInArk(call);
+    }
+
+    private async runCommandWithEditorPath(rCommand: string): Promise<void> {
+        const textEditor = vscode.window.activeTextEditor;
+        if (!textEditor) {
+            return;
+        }
+        const wad: vscode.TextDocument = textEditor.document;
+        const isSaved = await util.saveDocument(wad);
+        if (isSaved) {
+            const rPath = util.ToRStringLiteral(wad.fileName, '');
+            const call = rCommand.replace(/\$\$/g, rPath);
+            await this.runTextInArk(call);
+        }
+    }
+
+    private async runCommand(rCommand: string): Promise<void> {
+        await this.runTextInArk(rCommand);
+    }
+
+    private async runFromBeginningToLine(): Promise<void> {
+        const textEditor = vscode.window.activeTextEditor;
+        if (!textEditor) {
+            return;
+        }
+        const endLine = textEditor.selection.end.line;
+        const charactersOnLine = textEditor.document.lineAt(endLine).text.length;
+        const endPos = new vscode.Position(endLine, charactersOnLine);
+        const range = new vscode.Range(new vscode.Position(0, 0), endPos);
+        const text = textEditor.document.getText(range);
+        if (text === undefined) {
+            return;
+        }
+        await this.runTextInArk(text);
+    }
+
+    private async runFromLineToEnd(): Promise<void> {
+        const textEditor = vscode.window.activeTextEditor;
+        if (!textEditor) {
+            return;
+        }
+        const startLine = textEditor.selection.start.line;
+        const startPos = new vscode.Position(startLine, 0);
+        const endLine = textEditor.document.lineCount;
+        const range = new vscode.Range(startPos, new vscode.Position(endLine, 0));
+        const text = textEditor.document.getText(range);
+        await this.runTextInArk(text);
+    }
+
+    private async runChunks(chunks: vscode.Range[]): Promise<void> {
+        const textEditor = vscode.window.activeTextEditor;
+        if (!textEditor) {
+            return;
+        }
+        const text = chunks
+            .map((chunk) => textEditor.document.getText(chunk).trim())
+            .filter((chunk) => chunk.length > 0)
+            .join('\n');
+        if (text.length > 0) {
+            await this.runTextInArk(text);
+        }
+    }
+
+    private async runSelectionInArk(moveCursor: boolean): Promise<void> {
+        const selectionInfo = selection.getSelection();
+        if (!selectionInfo) {
+            return;
+        }
+        if (moveCursor && selectionInfo.linesDownToMoveCursor > 0) {
+            const textEditor = vscode.window.activeTextEditor;
+            if (!textEditor) {
+                return;
+            }
+            const lineCount = textEditor.document.lineCount;
+            if (selectionInfo.linesDownToMoveCursor + textEditor.selection.end.line === lineCount) {
+                const endPos = new vscode.Position(lineCount, textEditor.document.lineAt(lineCount - 1).text.length);
+                await textEditor.edit(e => e.insert(endPos, '\n'));
+            }
+            await vscode.commands.executeCommand('cursorMove', { to: 'down', value: selectionInfo.linesDownToMoveCursor });
+            await vscode.commands.executeCommand('cursorMove', { to: 'wrappedLineFirstNonWhitespaceCharacter' });
+        }
+        await this.runTextInArk(selectionInfo.selectedText);
+    }
+
+    private async runTextInArk(text: string, execute: boolean = true): Promise<void> {
+        const entry = await this.pickSessionForExecution();
+        if (!entry) {
+            return;
+        }
+
+        if (entry.mode === 'tmux' && entry.tmuxSessionName) {
+            const exists = await this.tmuxHasSession(entry.tmuxSessionName);
+            if (!exists) {
+                void vscode.window.showErrorMessage(`tmux session "${entry.tmuxSessionName}" 不存在。`);
+                return;
+            }
+            await this.ensureConsoleWindow(entry);
+            await this.sendTextToTmux(entry.tmuxSessionName, text, execute);
+        } else {
+            const terminal = this.externalTerminals.get(entry.name);
+            if (!terminal) {
+                const choice = await vscode.window.showWarningMessage(
+                    '未找到可用的 Ark console 终端。是否先打开一个？',
+                    'Open Console',
+                    'Cancel'
+                );
+                if (choice === 'Open Console') {
+                    await this.openExternalConsole(entry.connectionFilePath, entry.name);
+                }
+            }
+            const resolved = this.externalTerminals.get(entry.name);
+            if (!resolved) {
+                return;
+            }
+            resolved.sendText(text, execute);
+        }
+
+        this.updateRegistryAttachment(entry.name);
+        this.setActiveSession(entry.name);
     }
 
     private getSessionsDir(): string {
@@ -270,6 +448,7 @@ export class ArkConsoleBackend implements IRConsoleBackend {
             await this.openConsoleByName(sessionName);
         } else {
             void vscode.window.showInformationMessage('已生成 Ark connection file，请手动启动 Ark kernel 与 console。');
+            this.setActiveSession(sessionName);
         }
     }
 
@@ -360,6 +539,7 @@ export class ArkConsoleBackend implements IRConsoleBackend {
         }
 
         this.updateRegistryAttachment(name);
+        this.setActiveSession(name);
     }
 
     private async openExternalConsole(connectionFile: string, name: string): Promise<void> {
@@ -368,6 +548,7 @@ export class ArkConsoleBackend implements IRConsoleBackend {
         const terminal = vscode.window.createTerminal({ name: `Ark Console: ${name}` });
         terminal.show(true);
         terminal.sendText(command, true);
+        this.externalTerminals.set(name, terminal);
     }
 
     private resolveStartupFile(name: string, sessionsDir: string): string {
@@ -482,6 +663,87 @@ export class ArkConsoleBackend implements IRConsoleBackend {
             this.outputChannel.appendLine(`tmux error: ${String(result.error)}`);
         }
         return result;
+    }
+
+    private async pickSessionForExecution(): Promise<ArkSessionEntry | undefined> {
+        const registry = this.loadRegistry();
+        if (registry.length === 0) {
+            const choice = await vscode.window.showInformationMessage(
+                'No Ark sessions found. Create one now?',
+                'Create',
+                'Cancel'
+            );
+            if (choice === 'Create') {
+                await this.createSession();
+            }
+            return undefined;
+        }
+
+        if (this.activeSessionName) {
+            const entry = registry.find((item) => item.name === this.activeSessionName);
+            if (entry) {
+                return entry;
+            }
+        }
+
+        if (registry.length === 1) {
+            return registry[0];
+        }
+
+        const selected = await vscode.window.showQuickPick(
+            registry.map((entry) => ({
+                label: entry.name,
+                description: entry.tmuxSessionName ?? entry.mode,
+            })),
+            { placeHolder: 'Select Ark session to run code' }
+        );
+        if (!selected) {
+            return undefined;
+        }
+        return registry.find((entry) => entry.name === selected.label);
+    }
+
+    private async listTmuxWindows(sessionName: string): Promise<string[]> {
+        const result = await this.runTmux(this.getTmuxPath(), ['list-windows', '-t', sessionName, '-F', '#{window_name}']);
+        if (result.status !== 0) {
+            return [];
+        }
+        return (result.stdout || '')
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0);
+    }
+
+    private async ensureConsoleWindow(entry: ArkSessionEntry): Promise<void> {
+        if (!entry.tmuxSessionName) {
+            return;
+        }
+        const windows = await this.listTmuxWindows(entry.tmuxSessionName);
+        if (windows.includes('console')) {
+            return;
+        }
+        const consoleTemplate = this.getConsoleCommandTemplate();
+        const consoleCommand = renderShellTemplate(consoleTemplate, { connectionFile: entry.connectionFilePath });
+        await this.runTmux(this.getTmuxPath(), ['new-window', '-t', entry.tmuxSessionName, '-n', 'console', 'sh', '-lc', consoleCommand]);
+    }
+
+    private async sendTextToTmux(sessionName: string, text: string, execute: boolean): Promise<void> {
+        const target = `${sessionName}:console`;
+        const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+        const delayMs = util.config().get<number>('rtermSendDelay') || 8;
+        const lastIndex = lines.length - 1;
+        for (const [index, line] of lines.entries()) {
+            if (line.length > 0) {
+                await this.runTmux(this.getTmuxPath(), ['send-keys', '-t', target, '-l', '--', line]);
+            }
+            const shouldExecute = execute || index < lastIndex;
+            if (shouldExecute) {
+                await this.runTmux(this.getTmuxPath(), ['send-keys', '-t', target, 'Enter']);
+            }
+            if (index < lastIndex) {
+                await util.delay(delayMs);
+            }
+        }
     }
 
     private async resolveRHome(): Promise<string | undefined> {
