@@ -266,6 +266,26 @@
         "command": "r.createRTerm"
       },
       {
+        "title": "Create Ark session",
+        "category": "R Ark",
+        "command": "r.ark.createSession"
+      },
+      {
+        "title": "Attach Ark session",
+        "category": "R Ark",
+        "command": "r.ark.attachSession"
+      },
+      {
+        "title": "Open Ark console",
+        "category": "R Ark",
+        "command": "r.ark.openConsole"
+      },
+      {
+        "title": "Stop Ark session",
+        "category": "R Ark",
+        "command": "r.ark.stopSession"
+      },
+      {
         "title": "Run Source",
         "category": "R",
         "command": "r.runSource",
@@ -1430,10 +1450,54 @@
           ],
           "description": "Ark session mode to use when starting the kernel."
         },
+        "r.ark.sessionsDir": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Root directory for Ark session metadata (connection file, announce file). Leave empty to use extension global storage."
+        },
+        "r.ark.console.driver": {
+          "type": "string",
+          "default": "tmux",
+          "enum": [
+            "tmux",
+            "external"
+          ],
+          "description": "Console driver for Ark sessions. Use \"tmux\" to manage sessions in tmux, or \"external\" for manual console management."
+        },
+        "r.ark.console.commandTemplate": {
+          "type": "string",
+          "default": "jupyter console --existing {connectionFile}",
+          "description": "Command template used to launch a console attached to an Ark connection file."
+        },
+        "r.ark.kernel.commandTemplate": {
+          "type": "string",
+          "default": "{arkPath} --connection_file {connectionFile} --session-mode {sessionMode} --startup-file {startupFile}",
+          "description": "Command template used to launch an Ark kernel."
+        },
+        "r.ark.kernel.startupFileTemplate": {
+          "type": "string",
+          "default": "{sessionsDir}/{name}/init-ark.R",
+          "description": "Template for the Ark startup file path."
+        },
         "r.ark.ipAddress": {
           "type": "string",
           "default": "127.0.0.1",
           "description": "IP address passed to Ark when opening the LSP comm."
+        },
+        "r.ark.tmux.path": {
+          "type": "string",
+          "default": "tmux",
+          "description": "Path to tmux executable. Leave empty to use PATH."
+        },
+        "r.ark.tmux.sessionNameTemplate": {
+          "type": "string",
+          "default": "vscode-ark-{name}",
+          "description": "Template for tmux session names."
+        },
+        "r.ark.tmux.manageKernel": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to launch Ark kernel inside tmux when creating a session."
         },
         "r.ark.sidecarPath": {
           "type": "string",
