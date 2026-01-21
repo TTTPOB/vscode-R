@@ -5,13 +5,9 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0"
-bytes = "1.6"
-data-encoding = "2.10"
-hmac = "0.12"
-jupyter-protocol = "0.11.0"
+runtimelib = { version = "0.30.2", features = ["tokio-runtime"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sha2 = "0.10"
 tokio = { version = "1.37", features = ["rt", "time"] }
 uuid = { version = "1.7", features = ["v4"] }
 zeromq = "0.5.0-pre"
