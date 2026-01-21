@@ -395,6 +395,8 @@ Ark 的 R 是嵌入式，并且它有自己的 startup 流程；你可以通过 
 - LSP
   - completion/diagnostics 是否正常
   - 断开/重连：关闭 Ark 后 VSCode 能否恢复（client stop/restart）
+- Ark sidecar smoke test
+  - 通过 pixi 的 R 4.4 环境运行：`pixi run -- node scripts/ark-sidecar-lsp-test.js`
 
 ---
 
