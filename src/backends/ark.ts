@@ -232,14 +232,6 @@ export class ArkConsoleBackend implements IRConsoleBackend {
             return;
         }
 
-        const forceConsole = this.isAttachRequest(text);
-        const executed = forceConsole ? false : await this.tryExecuteViaSidecar(entry.connectionFilePath, text);
-        if (executed) {
-            sessionRegistry.updateSessionAttachment(entry.name, nowIso());
-            this.setActiveSession(entry.name);
-            return;
-        }
-
         if (entry.mode === 'tmux' && entry.tmuxSessionName) {
             const exists = await this.tmuxHasSession(entry.tmuxSessionName);
             if (!exists) {
@@ -269,10 +261,6 @@ export class ArkConsoleBackend implements IRConsoleBackend {
 
         sessionRegistry.updateSessionAttachment(entry.name, nowIso());
         this.setActiveSession(entry.name);
-    }
-
-    private isAttachRequest(text: string): boolean {
-        return /\b\.?vsc\.attach\s*\(/.test(text);
     }
 
     private resolveSidecarPath(): string {
