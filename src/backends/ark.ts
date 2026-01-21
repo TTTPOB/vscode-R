@@ -24,6 +24,7 @@ const DEFAULT_SIGNATURE_SCHEME = 'hmac-sha256';
 const DEFAULT_SESSION_MODE: ArkSessionMode = 'console';
 const DEFAULT_ARK_PATH = 'ark';
 const DEFAULT_TMUX_PATH = 'tmux';
+const DEFAULT_SIDECAR_TIMEOUT_MS = 15000;
 
 function nowIso(): string {
     return new Date().toISOString();
@@ -245,6 +246,13 @@ export class ArkConsoleBackend implements IRConsoleBackend {
             return;
         }
 
+        const executed = await this.tryExecuteViaSidecar(entry.connectionFilePath, text);
+        if (executed) {
+            this.updateRegistryAttachment(entry.name);
+            this.setActiveSession(entry.name);
+            return;
+        }
+
         if (entry.mode === 'tmux' && entry.tmuxSessionName) {
             const exists = await this.tmuxHasSession(entry.tmuxSessionName);
             if (!exists) {
@@ -274,6 +282,49 @@ export class ArkConsoleBackend implements IRConsoleBackend {
 
         this.updateRegistryAttachment(entry.name);
         this.setActiveSession(entry.name);
+    }
+
+    private resolveSidecarPath(): string {
+        const configured = (util.config().get<string>('ark.sidecarPath') || '').trim();
+        if (configured) {
+            return configured;
+        }
+
+        const exeName = process.platform === 'win32' ? 'vscode-r-ark-sidecar.exe' : 'vscode-r-ark-sidecar';
+        const releasePath = extensionContext.asAbsolutePath(path.join('ark-sidecar', 'target', 'release', exeName));
+        if (fs.existsSync(releasePath)) {
+            return releasePath;
+        }
+
+        const debugPath = extensionContext.asAbsolutePath(path.join('ark-sidecar', 'target', 'debug', exeName));
+        if (fs.existsSync(debugPath)) {
+            return debugPath;
+        }
+
+        return exeName;
+    }
+
+    private async tryExecuteViaSidecar(connectionFile: string, code: string): Promise<boolean> {
+        const sidecarPath = this.resolveSidecarPath();
+        const encoded = Buffer.from(code, 'utf8').toString('base64');
+        const timeoutMs = util.config().get<number>('ark.lspTimeoutMs') ?? DEFAULT_SIDECAR_TIMEOUT_MS;
+        const args = [
+            '--execute',
+            '--connection-file',
+            connectionFile,
+            '--code',
+            encoded,
+            '--code-base64',
+            '--timeout-ms',
+            String(timeoutMs),
+        ];
+        const result = await util.spawnAsync(sidecarPath, args, { env: process.env });
+        if (result.error || result.status !== 0) {
+            const message = result.stderr || result.stdout || result.error?.message || 'Unknown error';
+            this.outputChannel.appendLine(`Sidecar execute failed: ${message}`);
+            return false;
+        }
+        return true;
     }
 
     private getSessionsDir(): string {

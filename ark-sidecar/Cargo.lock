@@ -809,6 +809,7 @@ name = "vscode-r-ark-sidecar"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "runtimelib",
  "serde",
  "serde_json",
