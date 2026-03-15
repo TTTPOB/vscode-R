@@ -1,15 +1,18 @@
 # Changelog
 
-## Unreleased
+## 2.9.0 - 2026-03-15
 
 ### Documentation
 
 * docs: add dev-docs and move vscode-ark doc
 * docs: update README with distinguishing features and fix vscodeignore
+* docs: update changelog with git-cliff
 
 ### Other
 
 * doc: changelog
+
+**Full Changelog**: <https://github.com/TTTPOB/vscode-R/compare/v2.8.10...v2.9.0>
 
 ## 2.8.10 - 2025-12-05
 
