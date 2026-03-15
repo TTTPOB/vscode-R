@@ -4,6 +4,7 @@
 .vscode
 .vscode-test/**
 .vscode/**
+.claude/**
 .xls
 .xlsx
 **/*.map
@@ -18,6 +19,27 @@ webpack.config.js
 .markdownlint.json
 .eslintignore
 
- node_modules 
- out/ 
-
+ node_modules
+ out/
+.pixi/**
+repo_ref/**
+dev-docs/**
+ark-sidecar/**
+.beads/**
+IMG_*.jpg
+refs
+objects
+hooks
+config
+HEAD
+.gitconfig
+.gitmodules
+.bash_profile
+.bashrc
+.zshrc
+.zprofile
+.profile
+.ripgreprc
+.env
+.mcp.json
+.idea

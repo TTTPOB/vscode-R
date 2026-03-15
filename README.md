@@ -3,6 +3,11 @@
 > **This is a fork of [vscode-R](https://github.com/REditorSupport/vscode-R) by REditorSupport.**
 > RRR maintains the original extension with additional bug fixes and improvements for R development in VS Code.
 
+## What's different from the original R extension?
+
+- **Configurable plot image format**: Choose between SVG and PNG for the plot viewer. PNG significantly improves performance when plots contain a large number of elements.
+- **Respawn on attach for help and language server**: Automatically respawn the help server and language server when attaching to a new R session, keeping help pages and completions up-to-date when switching between R versions.
+
 ## Features
 
 - Snippets for R and R Markdown
