@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.9.0 - 2026-03-15
+
+### Other
+
+* chore: update displayName, description, and README to differentiate from original R extension
+* chore: replace logo with custom RRR logo
+* chore: bump version to 2.9.0
+
+**Full Changelog**: <https://github.com/TTTPOB/vscode-R/compare/v2.8.10...v2.9.0>
+
 ## 2.8.10 - 2025-12-05
 
 ### Bug Fixes

@@ -1,12 +1,12 @@
 {
   "name": "rrr",
-  "displayName": "RRR",
-  "description": "R Extension for Visual Studio Code",
-  "version": "2.8.10",
+  "displayName": "RRR - R Enhanced",
+  "description": "Fork of vscode-R with additional features and bug fixes for R development in VS Code",
+  "version": "2.9.0",
   "author": "tttpob",
   "license": "SEE LICENSE IN LICENSE",
   "publisher": "tttpob",
-  "icon": "images/Rlogo.png",
+  "icon": "images/rrr-logo.jpg",
   "repository": {
     "type": "git",
     "url": "https://github.com/tttpob/vscode-R"
